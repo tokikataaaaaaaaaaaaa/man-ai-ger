@@ -156,14 +156,16 @@ mention / DM 受信
 | 種類 | 発火タイミング | 目的 |
 |---|---|---|
 | `start_check` | planned_start | 最初の一歩を決める |
-| `mid_check` | planned_start と planned_end の中間 | 進捗、詰まり、脱線、疲れを確認する |
+| `mid_check` | planned_mid または planned_start と planned_end の中間 | 進捗、詰まり、脱線、疲れを確認する |
 | `end_check` | planned_end または due 前 | 完了、継続、延期、ブロッカー化を決める |
 
 ルール:
 
 - 発火済み interaction は events で重複防止する
 - スリープ復帰時は「時刻一致」ではなく「予定時刻を過ぎて未送信」で判定する
-- 未応答の再確認は 1 回まで
+- planned_start / planned_mid / planned_end は Task properties で上書きできる
+- 連続 interaction の最小間隔は `interaction_spacing_min` で設定できる (既定 20 分)
+- 未応答の再確認は `recheck` として 1 回だけ送る。再確認までの時間は `recheck_after_min` で設定できる (既定 30 分)
 - オーナー Slack ID 未確定の間は送信しない
 
 ## 6. Dashboard
@@ -184,7 +186,7 @@ Dashboard は local web UI として実装する。現在の視覚仕様は `doc
 manaiger start    : daemon をフォアグラウンド起動
 manaiger status   : Project / Task の現在地を表示
 manaiger doctor   : Slack 連携、Codex App Server、DB 書込、単一インスタンスを検査
-manaiger config   : working hours / interaction 設定を表示・変更
+manaiger config   : working hours / interaction spacing / recheck interval を表示・変更
 ```
 
 `doctor` は利用可否を確認する。速度や品質を曖昧に診断しない。

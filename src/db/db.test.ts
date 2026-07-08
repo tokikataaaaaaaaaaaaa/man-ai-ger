@@ -15,6 +15,8 @@ import {
   setSetting,
   getWorkStart,
   getWorkEnd,
+  getInteractionSpacingMin,
+  getRecheckAfterMin,
   acquireDaemonLock,
 } from "./settings.js";
 import { localDate } from "../util/dates.js";
@@ -122,17 +124,27 @@ describe("settings", () => {
     expect(getSetting(db, "x")).toBe("2");
     expect(getWorkStart(db)).toBe("09:00");
     expect(getWorkEnd(db)).toBe("18:00");
+    expect(getInteractionSpacingMin(db)).toBe(20);
+    expect(getRecheckAfterMin(db)).toBe(30);
     setSetting(db, "work_start", "07:30");
     setSetting(db, "work_end", "19:30");
+    setSetting(db, "interaction_spacing_min", "15");
+    setSetting(db, "recheck_after_min", "45");
     expect(getWorkStart(db)).toBe("07:30");
     expect(getWorkEnd(db)).toBe("19:30");
+    expect(getInteractionSpacingMin(db)).toBe(15);
+    expect(getRecheckAfterMin(db)).toBe(45);
   });
 
-  it("不正な時刻設定はデフォルトにフォールバック", () => {
+  it("不正な時刻・分数設定はデフォルトにフォールバック", () => {
     setSetting(db, "work_start", "25:99");
     setSetting(db, "work_end", "99:99");
+    setSetting(db, "interaction_spacing_min", "0");
+    setSetting(db, "recheck_after_min", "241");
     expect(getWorkStart(db)).toBe("09:00");
     expect(getWorkEnd(db)).toBe("18:00");
+    expect(getInteractionSpacingMin(db)).toBe(20);
+    expect(getRecheckAfterMin(db)).toBe(30);
   });
 
   it("daemon ロック: 自プロセスは取得でき、生きている他プロセスには奪われない", () => {

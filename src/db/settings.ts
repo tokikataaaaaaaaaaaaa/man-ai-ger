@@ -26,6 +26,8 @@ export function deleteSetting(db: Db, key: string): void {
 
 export const DEFAULT_WORK_START = "09:00";
 export const DEFAULT_WORK_END = "18:00";
+export const DEFAULT_INTERACTION_SPACING_MIN = 20;
+export const DEFAULT_RECHECK_AFTER_MIN = 30;
 
 export function getWorkStart(db: Db): string {
   const v =
@@ -41,6 +43,36 @@ export function getWorkEnd(db: Db): string {
     process.env.MANAIGER_WORK_END ??
     DEFAULT_WORK_END;
   return isHHMM(v) ? v : DEFAULT_WORK_END;
+}
+
+function readMinuteSetting(
+  db: Db,
+  key: string,
+  envKey: string,
+  fallback: number,
+): number {
+  const raw = getSetting(db, key) ?? process.env[envKey] ?? "";
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 240) return fallback;
+  return n;
+}
+
+export function getInteractionSpacingMin(db: Db): number {
+  return readMinuteSetting(
+    db,
+    "interaction_spacing_min",
+    "MANAIGER_INTERACTION_SPACING_MIN",
+    DEFAULT_INTERACTION_SPACING_MIN,
+  );
+}
+
+export function getRecheckAfterMin(db: Db): number {
+  return readMinuteSetting(
+    db,
+    "recheck_after_min",
+    "MANAIGER_RECHECK_AFTER_MIN",
+    DEFAULT_RECHECK_AFTER_MIN,
+  );
 }
 
 /** オーナー (単一ユーザー) の Slack user ID。初回 DM で確定する。 */

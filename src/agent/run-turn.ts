@@ -97,6 +97,8 @@ export function fallbackCheck(input: TurnInput): string {
       return `「${input.taskName}」の途中確認です。\nいまの状態に近いのはどれですか？ 進んだ / 詰まった / 後でやる`;
     case "end_check":
       return `「${input.taskName}」の締め時間です。\n今日はどう閉じますか？ 完了 / 続ける / 延期する / ブロッカーあり`;
+    case "recheck":
+      return `「${input.taskName}」について、もう一度だけ確認します。\nいまの状態に近いものを選んでください。進んだ / 詰まった / 後でやる`;
   }
 }
 
@@ -152,13 +154,25 @@ export async function processTurn(
 
   appendTurn(db, "assistant", text, now);
   if (input.kind !== "user") {
+    const checkpointKind = input.kind;
+    const label =
+      input.kind === "start_check"
+        ? "開始"
+        : input.kind === "mid_check"
+          ? "途中"
+          : input.kind === "end_check"
+            ? "終了"
+            : "再";
     recordEvent(
       db,
       "checkpoint_sent",
-      `「${input.taskName}」の${
-        input.kind === "start_check" ? "開始" : input.kind === "mid_check" ? "途中" : "終了"
-      }確認を送信`,
-      { taskId: input.taskId, kind: input.kind, date: localDate(now) },
+      `「${input.taskName}」の${label}確認を送信`,
+      {
+        taskId: input.taskId,
+        kind: checkpointKind,
+        date: localDate(now),
+        ...(input.kind === "recheck" ? { originalKind: input.originalKind } : {}),
+      },
       now,
     );
   }

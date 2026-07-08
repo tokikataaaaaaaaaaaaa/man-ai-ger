@@ -18,6 +18,8 @@ import type { Db } from "../db/client.js";
 import { eventsOnDate } from "../db/events.js";
 import {
   getOwnerSlackId,
+  getInteractionSpacingMin,
+  getRecheckAfterMin,
   getWorkStart,
   getWorkEnd,
   heartbeatDaemonLock,
@@ -50,12 +52,20 @@ export function plannedChecksForTask(
   // 対象: 進行中のタスク、または今日が締切 (以前) の未着手タスク
   if (!isDoing && !isDueToday) return [];
 
-  const props = task.properties as { planned_start?: string; planned_end?: string };
+  const props = task.properties as {
+    planned_start?: string;
+    planned_mid?: string;
+    planned_end?: string;
+  };
   const startHHMM = isHHMMLike(props.planned_start) ? props.planned_start! : workStart;
   const endHHMM = isHHMMLike(props.planned_end) ? props.planned_end! : workEnd;
   const start = hhmmToMinutes(startHHMM);
   const end = Math.max(hhmmToMinutes(endHHMM), start + 30); // end は最低 start+30min
-  const mid = Math.floor((start + end) / 2);
+  const configuredMid = isHHMMLike(props.planned_mid) ? hhmmToMinutes(props.planned_mid) : null;
+  const mid =
+    configuredMid !== null && configuredMid > start && configuredMid < end
+      ? configuredMid
+      : Math.floor((start + end) / 2);
 
   const checks: PlannedCheck[] = [
     { taskId: task.id, taskName: task.name, kind: "start_check", atMinutes: start },
@@ -70,9 +80,6 @@ export function plannedChecksForTask(
 function isHHMMLike(v: unknown): v is string {
   return typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 }
-
-const SPACING_MIN = 20; // 連続通知の最小間隔 (分)
-const RECHECK_AFTER_MIN = 30; // 未応答の再確認までの時間 (分)
 
 interface SentCheck {
   taskId: string;
@@ -91,7 +98,8 @@ export function decideInteraction(db: Db, now: Date): TurnInput | null {
   // day_off の日は以後の interaction を止める
   if (todayEvents.some((e) => e.kind === "day_off")) return null;
 
-  // 直近の送信から SPACING_MIN 分は空ける
+  // 直近の送信から interaction_spacing_min 分は空ける
+  const spacingMin = getInteractionSpacingMin(db);
   const sent: SentCheck[] = todayEvents
     .filter((e) => e.kind === "checkpoint_sent")
     .map((e) => ({
@@ -100,7 +108,7 @@ export function decideInteraction(db: Db, now: Date): TurnInput | null {
       atMinutes: hhmmToMinutes(e.ts.slice(11, 16)),
     }));
   const lastSentMin = sent.length > 0 ? Math.max(...sent.map((s) => s.atMinutes)) : -Infinity;
-  if (nowMin - lastSentMin < SPACING_MIN) return null;
+  if (nowMin - lastSentMin < spacingMin) return null;
 
   const workStart = getWorkStart(db);
   const workEnd = getWorkEnd(db);
@@ -128,7 +136,7 @@ export function decideInteraction(db: Db, now: Date): TurnInput | null {
 
   // 未応答の再確認 (1 回だけ): 最後の checkpoint から RECHECK_AFTER_MIN 経過して
   // ユーザーの返信が無い場合、同じ確認をもう一度だけ送る
-  const recheck = decideRecheck(db, todayEvents, sent, nowMin, today);
+  const recheck = decideRecheck(db, todayEvents, sent, nowMin, today, getRecheckAfterMin(db));
   if (recheck) return recheck;
 
   return null;
@@ -140,13 +148,14 @@ function decideRecheck(
   sent: SentCheck[],
   nowMin: number,
   today: string,
+  recheckAfterMin: number,
 ): TurnInput | null {
   const checkpoints = todayEvents.filter((e) => e.kind === "checkpoint_sent");
   if (checkpoints.length === 0) return null;
   const last = checkpoints[checkpoints.length - 1]!;
   if (String(last.payload.kind) === "recheck") return null; // 再確認は 1 回まで
   const lastMin = hhmmToMinutes(last.ts.slice(11, 16));
-  if (nowMin - lastMin < RECHECK_AFTER_MIN) return null;
+  if (nowMin - lastMin < recheckAfterMin) return null;
 
   // その checkpoint 以後にユーザー発話があれば応答済み
   const replied = db
@@ -163,7 +172,7 @@ function decideRecheck(
   const kind = String(last.payload.kind ?? "");
   if (kind !== "start_check" && kind !== "mid_check" && kind !== "end_check") return null;
   const taskName = extractTaskName(last.summary);
-  return { kind: kind as "start_check" | "mid_check" | "end_check", taskId, taskName };
+  return { kind: "recheck", taskId, taskName, originalKind: kind };
 }
 
 function extractTaskName(summary: string): string {

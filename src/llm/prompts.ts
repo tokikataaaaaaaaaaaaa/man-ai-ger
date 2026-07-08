@@ -128,7 +128,13 @@ export type TurnInput =
   | { kind: "user"; text: string }
   | { kind: "start_check"; taskId: string; taskName: string }
   | { kind: "mid_check"; taskId: string; taskName: string }
-  | { kind: "end_check"; taskId: string; taskName: string };
+  | { kind: "end_check"; taskId: string; taskName: string }
+  | {
+      kind: "recheck";
+      taskId: string;
+      taskName: string;
+      originalKind: "start_check" | "mid_check" | "end_check";
+    };
 
 export const STATUS_LABEL: Record<string, string> = {
   todo: "未着手",
@@ -176,6 +182,8 @@ function renderInput(input: TurnInput): string {
       return `(システム: タスク「${input.taskName}」の途中確認の時刻です。途中確認プロトコルに従って、あなたから声をかけてください)`;
     case "end_check":
       return `(システム: タスク「${input.taskName}」の終了予定・締切前の確認時刻です。終了確認プロトコルに従って、あなたから声をかけてください)`;
+    case "recheck":
+      return `(システム: タスク「${input.taskName}」の前回確認に未応答です。再確認は1回だけです。責めずに、今の状態を選びやすい短い確認を送ってください)`;
   }
 }
 

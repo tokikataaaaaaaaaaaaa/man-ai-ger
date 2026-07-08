@@ -15,6 +15,8 @@ import { recentEvents } from "./db/events.js";
 import {
   getWorkStart,
   getWorkEnd,
+  getInteractionSpacingMin,
+  getRecheckAfterMin,
   getOwnerSlackId,
   setSetting,
 } from "./db/settings.js";
@@ -175,28 +177,63 @@ program
   .description("設定の表示・変更 (例: manaiger config --work-start 08:30)")
   .option("--work-start <HH:MM>", "勤務開始時刻")
   .option("--work-end <HH:MM>", "勤務終了時刻")
-  .action((opts: { workStart?: string; workEnd?: string }) => {
-    const config = loadConfig();
-    const db = openDb(config.dbPath);
-    if (opts.workStart) {
-      if (!isHHMM(opts.workStart)) {
-        console.error(`時刻の形式が不正です: ${opts.workStart} (例: 08:30)`);
-        process.exitCode = 1;
-        return;
+  .option("--interaction-spacing-min <minutes>", "連続 interaction の最小間隔 (1-240分)")
+  .option("--recheck-after-min <minutes>", "未応答時の再確認までの時間 (1-240分)")
+  .action(
+    (opts: {
+      workStart?: string;
+      workEnd?: string;
+      interactionSpacingMin?: string;
+      recheckAfterMin?: string;
+    }) => {
+      const config = loadConfig();
+      const db = openDb(config.dbPath);
+      if (opts.workStart) {
+        if (!isHHMM(opts.workStart)) {
+          console.error(`時刻の形式が不正です: ${opts.workStart} (例: 08:30)`);
+          process.exitCode = 1;
+          return;
+        }
+        setSetting(db, "work_start", opts.workStart);
       }
-      setSetting(db, "work_start", opts.workStart);
-    }
-    if (opts.workEnd) {
-      if (!isHHMM(opts.workEnd)) {
-        console.error(`時刻の形式が不正です: ${opts.workEnd} (例: 19:00)`);
-        process.exitCode = 1;
-        return;
+      if (opts.workEnd) {
+        if (!isHHMM(opts.workEnd)) {
+          console.error(`時刻の形式が不正です: ${opts.workEnd} (例: 19:00)`);
+          process.exitCode = 1;
+          return;
+        }
+        setSetting(db, "work_end", opts.workEnd);
       }
-      setSetting(db, "work_end", opts.workEnd);
-    }
-    const model = config.codexModel ? ` / model: ${config.codexModel}` : "";
-    console.log(`working hours ${getWorkStart(db)}-${getWorkEnd(db)}${model}`);
-  });
+      if (opts.interactionSpacingMin) {
+        const minutes = parseMinutesOption(opts.interactionSpacingMin);
+        if (minutes === null) {
+          console.error(`分数の形式が不正です: ${opts.interactionSpacingMin} (1-240 の整数)`);
+          process.exitCode = 1;
+          return;
+        }
+        setSetting(db, "interaction_spacing_min", String(minutes));
+      }
+      if (opts.recheckAfterMin) {
+        const minutes = parseMinutesOption(opts.recheckAfterMin);
+        if (minutes === null) {
+          console.error(`分数の形式が不正です: ${opts.recheckAfterMin} (1-240 の整数)`);
+          process.exitCode = 1;
+          return;
+        }
+        setSetting(db, "recheck_after_min", String(minutes));
+      }
+      const model = config.codexModel ? ` / model: ${config.codexModel}` : "";
+      console.log(
+        `working hours ${getWorkStart(db)}-${getWorkEnd(db)} / spacing ${getInteractionSpacingMin(db)}min / recheck ${getRecheckAfterMin(db)}min${model}`,
+      );
+    },
+  );
+
+function parseMinutesOption(raw: string): number | null {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 240) return null;
+  return n;
+}
 
 program.parseAsync().catch((err) => {
   console.error(String(err));
