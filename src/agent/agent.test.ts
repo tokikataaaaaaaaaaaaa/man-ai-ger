@@ -208,6 +208,29 @@ describe("processTurn (start_of_day)", () => {
   });
 });
 
+describe("processTurn (add_task)", () => {
+  it("Slack mention が無くても発火でき、聞き出した仕事が create_task で登録される。checkpoint_sent は残らない", async () => {
+    const llm = new FakeLlm([
+      ok("1件、記録しました。", [
+        { type: "create_task", name: "社内wikiの更新", project: null, due: null },
+      ]),
+    ]);
+    const { sent, send } = collectSend();
+    await processTurn({ db, llm }, { kind: "add_task" }, send);
+
+    expect(sent[0]).toContain("記録しました");
+    expect(getByName(db, "社内wikiの更新", "Task")).not.toBeNull();
+    expect(eventsOnDate(db, localDate()).some((e) => e.kind === "checkpoint_sent")).toBe(false);
+  });
+
+  it("LLM 不通でも決定論フォールバックで応答する", async () => {
+    const llm = new FakeLlm([new Error("down")]);
+    const { sent, send } = collectSend();
+    await processTurn({ db, llm }, { kind: "add_task" }, send);
+    expect(sent[0]).toContain("登録されていない仕事");
+  });
+});
+
 describe("buildContext", () => {
   it("プロジェクト配下にタスクが並び、初日は空表示", () => {
     const empty = buildContext(db, new Date());

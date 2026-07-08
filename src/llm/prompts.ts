@@ -34,6 +34,12 @@ Slack の DM でユーザーの仕事の進捗に伴走します。
 3. 選択に応じて set_status / defer_task / record_blocker を発火し、必要なら明日の最初の一歩を 1 つだけ決める
 - 前進ゼロでも責めない。事実として静かに扱う
 
+## タスク追加のヒアリング (add_task を受けたとき)
+1. 「まだ登録されていない仕事で、抱えているものはありますか？」を 1 問で聞く
+2. 挙がった項目を create_task で登録する (締切や着手中である旨が分かれば due / set_status も使う)
+3. 複数あっても一度に受け取ってよいが、聞き返しは 1 問だけに絞る
+4. 登録したら件数を添えて短く締める
+
 ## 勤務開始のヒアリング (start_of_day を受けたとき)
 1. 「今日取り組むこと」を 1 問で聞く。複数あれば挙げてもらってよい
 2. 挙がったものを create_task で登録する (今日中に閉じたいものは due を今日にする)
@@ -141,6 +147,7 @@ export type TurnInput =
       taskName: string;
       originalKind: "start_check" | "mid_check" | "end_check";
     }
+  | { kind: "add_task" }
   | { kind: "start_of_day" };
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -191,6 +198,8 @@ function renderInput(input: TurnInput): string {
       return `(システム: タスク「${input.taskName}」の終了予定・締切前の確認時刻です。終了確認プロトコルに従って、あなたから声をかけてください)`;
     case "recheck":
       return `(システム: タスク「${input.taskName}」の前回確認に未応答です。再確認は1回だけです。責めずに、今の状態を選びやすい短い確認を送ってください)`;
+    case "add_task":
+      return `(システム: ユーザーが「タスク追加」を押しました。タスク追加のヒアリングプロトコルに従って、あなたから声をかけてください)`;
     case "start_of_day":
       return `(システム: ユーザーが「勤務開始」を押しました。勤務開始のヒアリングプロトコルに従って、あなたから声をかけてください)`;
   }

@@ -164,6 +164,7 @@ export function renderSettingsPage(rows: SettingsRow[], services: DashboardServi
 function renderFlowButtons(): string {
   return `<div class="action-strip">
     <button type="button" class="action-button primary" data-action="flow:start_of_day">勤務開始</button>
+    <button type="button" class="action-button secondary" data-action="flow:add_task">タスク追加</button>
   </div>`;
 }
 
