@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { extractJsonObject, parseLlmReply } from "./parse.js";
-import { buildTurnPrompt, renderTree, SYSTEM_PROMPT } from "./prompts.js";
+import { buildTurnPrompt, renderTree, SYSTEM_PROMPT, TURN_OUTPUT_SCHEMA } from "./prompts.js";
 import type { TurnContext } from "./prompts.js";
 import type { WorkObject } from "../db/types.js";
 
@@ -147,5 +147,36 @@ describe("prompts", () => {
     expect(p).toContain("今日: 2026-06-29 (月)");
     expect(p).toContain("金曜日: 2026-07-03 (金)");
     expect(p).toContain("日付参照表");
+  });
+});
+
+describe("TURN_OUTPUT_SCHEMA (Codex strict JSON Schema 互換性)", () => {
+  it("additionalProperties:false のオブジェクトは properties の全キーが required にある", () => {
+    // Codex App Server (OpenAI 系 structured output) は additionalProperties:false の
+    // オブジェクトに対し、properties の全キーを required に列挙することを要求する。
+    // 一部のキーだけ required だと turn/start が 400 で拒否される (実運用で発生した回帰)。
+    const violations: string[] = [];
+    function walk(node: unknown, path: string): void {
+      if (typeof node !== "object" || node === null) return;
+      const schema = node as Record<string, unknown>;
+      if (schema.type === "object" && schema.additionalProperties === false) {
+        const properties = (schema.properties ?? {}) as Record<string, unknown>;
+        const required = new Set((schema.required as string[] | undefined) ?? []);
+        for (const key of Object.keys(properties)) {
+          if (!required.has(key)) violations.push(`${path}.${key}`);
+        }
+      }
+      for (const [key, value] of Object.entries(schema)) {
+        if (key === "properties" && typeof value === "object" && value !== null) {
+          for (const [propKey, propValue] of Object.entries(value)) {
+            walk(propValue, `${path}.properties.${propKey}`);
+          }
+        } else if (key === "items") {
+          walk(value, `${path}.items`);
+        }
+      }
+    }
+    walk(TURN_OUTPUT_SCHEMA, "$");
+    expect(violations).toEqual([]);
   });
 });
