@@ -199,7 +199,6 @@ program
       timeoutMs: 5_000,
     });
     const codexAvailable = await codex.checkAvailable(5_000);
-    codex.stop();
 
     const logger = createLogger(config.logPath);
     const slack =
@@ -215,6 +214,7 @@ program
 
     const server = await startDashboardServer({
       db,
+      llm: codex,
       host: opts.host,
       port,
       codexAvailable,
@@ -224,6 +224,7 @@ program
     console.log(`Dashboard: ${server.url}`);
 
     const shutdown = async (): Promise<void> => {
+      codex.stop();
       await server.stop().catch(() => undefined);
       await slack?.stop().catch(() => undefined);
       process.exit(0);

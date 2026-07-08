@@ -28,7 +28,7 @@ export interface DashboardServerOptions extends DashboardSnapshotOptions {
   host?: string;
   port: number;
   sendToOwner?: (text: string, quickReplies?: QuickReply[]) => Promise<void>;
-  /** flow:add_task の LLM 呼び出しに使う (任意。無ければ 409)。 */
+  /** Dashboard flow intent の LLM 呼び出しに使う (任意。無ければ 409)。 */
   llm?: LlmClient;
   /** 設定ページに表示する環境情報 (任意)。 */
   settingsInfo?: SettingsViewInfo;
@@ -121,6 +121,17 @@ export async function handleDashboardIntent(
       await sendToOwner(text, followUpQuickReplies(text));
     });
     return { message: "Slack DMでタスク追加のヒアリングを始めました。" };
+  }
+
+  if (action === "flow:start_of_day") {
+    if (!opts.llm) {
+      throw new DashboardIntentError(409, "Codex App Serverが未設定です。`manaiger doctor` で確認してください。");
+    }
+    const sendToOwner = opts.sendToOwner;
+    await processTurn({ db: opts.db, llm: opts.llm }, { kind: "start_of_day" }, async (text) => {
+      await sendToOwner(text, followUpQuickReplies(text));
+    });
+    return { message: "Slack DMで勤務開始のヒアリングを始めました。" };
   }
 
   const coaching = parseCoachingIntent(action.replace(/^coach:/, "manaiger:coach:"));
