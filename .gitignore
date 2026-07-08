@@ -3,6 +3,9 @@ dist/
 *.log
 .env
 .env.*
+!.env.example
 *.sqlite
 *.db
 .DS_Store
+demo-out/
+.gstack/

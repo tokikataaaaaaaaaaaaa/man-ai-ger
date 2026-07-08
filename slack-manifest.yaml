@@ -1,0 +1,29 @@
+# Man.Ai.ger の Slack App Manifest。
+# 使い方: https://api.slack.com/apps → Create New App → "From a manifest" → これを貼り付け
+#
+# 会社ワークスペースへの展開時も同じ manifest で "Create from manifest" するだけ
+# (requirements.md §3 環境移植性)。スコープは DM の読み書きのみの最小構成 —
+# これがそのまま Slack 管理者への承認申請資料になります。
+display_information:
+  name: Man.Ai.ger
+  description: 共感コーチ型のマネジメント AI。朝夕に進捗へ伴走します (ローカル動作・単一ユーザー)
+  background_color: "#1a2b3c"
+features:
+  bot_user:
+    display_name: Man.Ai.ger
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write   # DM の送信
+      - im:history   # 自分宛て DM の受信 (message.im イベント)
+      - im:write     # DM チャンネルを開く (conversations.open)
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.im
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
