@@ -13,7 +13,7 @@ import {
   getWorkEnd,
   getWorkStart,
 } from "../db/settings.js";
-import type { TaskStatus, WorkEvent, WorkObject } from "../db/types.js";
+import type { TaskStatus, WorkObject } from "../db/types.js";
 import { listPendingCandidates, type Candidate } from "../agent/candidates.js";
 import { plannedChecksForTask } from "../flows/scheduler.js";
 import { hhmmToMinutes, localDate, localTime } from "../util/dates.js";
@@ -292,40 +292,15 @@ function buildSlackContext(db: Db, pendingCandidates: Candidate[]): DashboardCon
 
   if (items.length > 0) return items;
 
-  const recent = recentEvents(db, 8)
-    .filter((e) => e.kind === "slack_message_observed" || e.kind === "coaching_intent")
-    .slice(-3);
-  if (recent.length === 0) {
-    return [
-      {
-        source: "Man.Ai.ger",
-        time: "--:--",
-        text: "Slackで拾った確認待ちはありません。",
-        chips: [],
-        actions: [],
-      },
-    ];
-  }
-  return recent.map(contextItemFromEvent);
-}
-
-function contextItemFromEvent(e: WorkEvent): DashboardContextItem {
-  if (e.kind === "coaching_intent") {
-    return {
-      source: "Man.Ai.ger DM",
-      time: timeFromIso(e.ts),
-      text: e.summary,
-      chips: [{ label: "相談中", tone: "plan" }],
+  return [
+    {
+      source: "Man.Ai.ger",
+      time: "--:--",
+      text: "タスク候補の承認待ちはありません。",
+      chips: [],
       actions: [],
-    };
-  }
-  return {
-    source: `${String(e.payload.channel ?? "Slack")} / ${String(e.payload.author ?? "unknown")}`,
-    time: timeFromIso(e.ts),
-    text: String(e.payload.text ?? e.summary),
-    chips: [],
-    actions: [],
-  };
+    },
+  ];
 }
 
 function buildServices(
