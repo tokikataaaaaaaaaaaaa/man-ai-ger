@@ -157,6 +157,20 @@ describe("processTurn (scheduled checks)", () => {
     expect(sent[0]).toContain("締め時間");
     expect(eventsOnDate(db, localDate()).some((e) => e.kind === "checkpoint_sent")).toBe(true);
   });
+
+  it("recheck: 送信成功で checkpoint_sent が originalKind 付きで記録される", async () => {
+    const llm = new FakeLlm([ok("「API 設計」について、もう一度だけ確認します。")]);
+    const { sent, send } = collectSend();
+    await processTurn(
+      { db, llm },
+      { kind: "recheck", taskId: "t1", taskName: "API 設計", originalKind: "start_check" },
+      send,
+    );
+    expect(sent).toHaveLength(1);
+    const event = eventsOnDate(db, localDate()).find((e) => e.kind === "checkpoint_sent");
+    expect(event).toBeDefined();
+    expect(event?.payload).toMatchObject({ kind: "recheck", originalKind: "start_check" });
+  });
 });
 
 describe("processTurn (start_of_day)", () => {
