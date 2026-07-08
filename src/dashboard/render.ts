@@ -145,20 +145,57 @@ export function renderLogPage(days: LogDay[], services: DashboardService[]): str
 // --- 設定ページ ---------------------------------------------------------------
 
 export function renderSettingsPage(rows: SettingsRow[], services: DashboardService[]): string {
-  const list = rows
+  const editableRows = rows.filter((r) => r.input);
+  const readonlyRows = rows.filter((r) => !r.input);
+  const editable = editableRows
     .map(
       (r) => `<div class="settings-row">
     <div class="settings-label">${escapeHtml(r.label)}</div>
-    <div class="settings-value">${escapeHtml(r.value)}</div>
+    <div class="settings-value">${renderSettingsInput(r)}</div>
     ${r.hint ? `<div class="settings-hint">${escapeHtml(r.hint)}</div>` : ""}
   </div>`,
     )
     .join("");
-  const content = `<div class="page-stack"><section class="panel task-group">
-    <div class="panel-head"><div><div class="panel-title">設定</div><div class="panel-meta">変更はターミナル (manaiger config) か .env で行います</div></div></div>
-    <div class="settings-list">${list}</div>
-  </section></div>`;
+  const readonly = readonlyRows.map(renderReadonlySettingsRow).join("");
+  const content = `<div class="page-stack">
+  <section class="panel task-group">
+    <div class="panel-head"><div><div class="panel-title">設定</div><div class="panel-meta">保存すると次の確認判定から反映されます</div></div></div>
+    <form id="settings-form" class="settings-list settings-form" novalidate>
+      ${editable}
+      <div class="settings-actions"><button type="submit" class="action-button primary">保存</button></div>
+    </form>
+  </section>
+  <section class="panel task-group">
+    <div class="panel-head"><div><div class="panel-title">起動時設定</div><div class="panel-meta">変更には init / .env 編集と再起動が必要です</div></div></div>
+    <div class="settings-list">${readonly}</div>
+  </section>
+</div>`;
   return renderShell("settings", "設定 — Man.Ai.ger", services, content);
+}
+
+function renderSettingsInput(row: SettingsRow): string {
+  if (!row.input) return escapeHtml(row.value);
+  const input = row.input;
+  const attrs = [
+    `id="setting-${input.name}"`,
+    `name="${input.name}"`,
+    `type="${input.type}"`,
+    `value="${escapeHtml(row.value)}"`,
+    "required",
+    input.min ? `min="${escapeHtml(input.min)}"` : "",
+    input.max ? `max="${escapeHtml(input.max)}"` : "",
+    input.step ? `step="${escapeHtml(input.step)}"` : "",
+  ].filter(Boolean).join(" ");
+  const suffix = input.type === "number" ? `<span class="input-suffix">分</span>` : "";
+  return `<div class="input-wrap"><input class="settings-input" ${attrs}>${suffix}</div>`;
+}
+
+function renderReadonlySettingsRow(row: SettingsRow): string {
+  return `<div class="settings-row">
+    <div class="settings-label">${escapeHtml(row.label)}</div>
+    <div class="settings-value">${escapeHtml(row.value)}</div>
+    ${row.hint ? `<div class="settings-hint">${escapeHtml(row.hint)}</div>` : ""}
+  </div>`;
 }
 
 function renderFlowButtons(): string {
@@ -375,6 +412,7 @@ button { font: inherit; }
 .action-button:disabled { cursor: not-allowed; opacity: .72; }
 .page-stack { display: grid; gap: 16px; max-width: 860px; }
 .task-list, .settings-list { padding: 6px 14px 14px; display: grid; }
+.settings-form { gap: 0; }
 .task-row { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--surface-soft); flex-wrap: wrap; padding: 6px 0; }
 .task-row:last-child { border-bottom: 0; }
 .task-name { font-size: 13.5px; overflow-wrap: anywhere; min-width: 0; flex: 1; }
@@ -384,7 +422,12 @@ button { font: inherit; }
 .settings-label { color: var(--muted); font-size: 12.5px; font-weight: 700; }
 .settings-value { font-size: 13.5px; overflow-wrap: anywhere; }
 .settings-hint { grid-column: 2; color: var(--muted); font-size: 12px; }
-@media (max-width: 560px) { .settings-row { grid-template-columns: 1fr; } .settings-hint { grid-column: 1; } }
+.input-wrap { display: inline-flex; align-items: center; gap: 8px; max-width: 220px; width: 100%; }
+.settings-input { width: 100%; min-height: 34px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 0 10px; font: inherit; font-size: 13px; }
+.settings-input:focus { outline: 2px solid #c7e1d6; border-color: #8ec4aa; }
+.input-suffix { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.settings-actions { display: flex; justify-content: flex-end; padding-top: 12px; }
+@media (max-width: 560px) { .settings-row { grid-template-columns: 1fr; } .settings-hint { grid-column: 1; } .input-wrap { max-width: none; } }
 .toast { position: fixed; right: 18px; bottom: 18px; max-width: min(420px, calc(100vw - 36px)); background: #1f2522; color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.45; box-shadow: 0 8px 28px rgba(31, 37, 34, .18); opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .16s ease, transform .16s ease; }
 .toast.show { opacity: 1; transform: translateY(0); }
 @media (max-width: 1180px) { .content-grid { grid-template-columns: 1fr; } }
@@ -418,23 +461,26 @@ const JS = `
       el.className = "toast";
     }, 2600);
   }
-  function postAction(action) {
+  function postJson(path, payload, fallbackMessage, reloadOnSuccess) {
     var xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/intent", true);
+    xhr.open("POST", path, true);
     xhr.setRequestHeader("Content-Type", "application/json");
     xhr.onload = function () {
-      var message = "Slack DMへ送りました。";
+      var message = fallbackMessage;
       try {
         var body = JSON.parse(xhr.responseText || "{}");
         if (body.message) message = body.message;
       } catch (_) {}
       toast(message);
-      if (xhr.status >= 200 && xhr.status < 300) {
+      if (reloadOnSuccess && xhr.status >= 200 && xhr.status < 300) {
         window.setTimeout(function () { window.location.reload(); }, 900);
       }
     };
-    xhr.onerror = function () { toast("Slack DMへ送れませんでした。"); };
-    xhr.send(JSON.stringify({ action: action }));
+    xhr.onerror = function () { toast("送信できませんでした。"); };
+    xhr.send(JSON.stringify(payload));
+  }
+  function postAction(action) {
+    postJson("/api/intent", { action: action }, "Slack DMへ送りました。", true);
   }
   document.addEventListener("click", function (event) {
     var target = event.target;
@@ -442,6 +488,20 @@ const JS = `
     var action = target.getAttribute("data-action");
     if (!action) return;
     postAction(action);
+  });
+  document.addEventListener("submit", function (event) {
+    var form = event.target;
+    if (!form || form.id !== "settings-form") return;
+    event.preventDefault();
+    var button = form.querySelector("button[type=submit]");
+    if (button) button.disabled = true;
+    postJson("/api/settings", {
+      workStart: form.elements.workStart.value,
+      workEnd: form.elements.workEnd.value,
+      interactionSpacingMin: form.elements.interactionSpacingMin.value,
+      recheckAfterMin: form.elements.recheckAfterMin.value
+    }, "設定を保存しました。", true);
+    window.setTimeout(function () { if (button) button.disabled = false; }, 1200);
   });
   window.setTimeout(function () { window.location.reload(); }, 30000);
 })();

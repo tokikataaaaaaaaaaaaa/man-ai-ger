@@ -60,13 +60,15 @@ describe("buildLogView", () => {
 });
 
 describe("buildSettingsView", () => {
-  it("working hours と変更ヒントを表示する", () => {
+  it("日常変更する設定は編集可能、起動時設定は read-only で表示する", () => {
     setSetting(db, "work_start", "10:00");
     const rows = buildSettingsView(db, { home: "/tmp/x", dashboardPort: 7799 });
-    const wh = rows.find((r) => r.label === "working hours");
-    expect(wh?.value).toBe("10:00 - 18:00");
-    expect(wh?.hint).toContain("manaiger config");
+    const start = rows.find((r) => r.label === "作業開始時刻");
+    expect(start?.value).toBe("10:00");
+    expect(start?.input?.name).toBe("workStart");
+    expect(rows.find((r) => r.label === "連続確認の最小間隔")?.input?.type).toBe("number");
     expect(rows.find((r) => r.label === "データの保存先")?.value).toBe("/tmp/x");
+    expect(rows.find((r) => r.label === "データの保存先")?.input).toBeUndefined();
   });
 });
 
@@ -96,7 +98,9 @@ describe("HTTP ルート", () => {
     expect(log).toContain('class="nav-item active" href="/log"');
 
     const settings = await get(`${handle.url}settings`);
-    expect(settings).toContain("working hours");
+    expect(settings).toContain("作業開始時刻");
+    expect(settings).toContain('id="settings-form"');
+    expect(settings).toContain('name="workStart"');
     expect(settings).toContain("/tmp/qa");
     // 内部名を出さない
     for (const html of [tasks, log, settings]) {

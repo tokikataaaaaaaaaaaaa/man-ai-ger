@@ -6,7 +6,13 @@ import type { Db } from "../db/client.js";
 import { eventsOnDate, recentEvents } from "../db/events.js";
 import { taskProjectId } from "../db/links.js";
 import { listByType } from "../db/objects.js";
-import { getSetting, getWorkEnd, getWorkStart } from "../db/settings.js";
+import {
+  getInteractionSpacingMin,
+  getRecheckAfterMin,
+  getSetting,
+  getWorkEnd,
+  getWorkStart,
+} from "../db/settings.js";
 import type { TaskStatus, WorkEvent, WorkObject } from "../db/types.js";
 import { listPendingCandidates, type Candidate } from "../agent/candidates.js";
 import { plannedChecksForTask } from "../flows/scheduler.js";
@@ -455,6 +461,13 @@ export interface SettingsRow {
   label: string;
   value: string;
   hint?: string;
+  input?: {
+    name: "workStart" | "workEnd" | "interactionSpacingMin" | "recheckAfterMin";
+    type: "time" | "number";
+    min?: string;
+    max?: string;
+    step?: string;
+  };
 }
 
 export interface SettingsViewInfo {
@@ -463,24 +476,33 @@ export interface SettingsViewInfo {
   dashboardPort?: number;
 }
 
-/** 設定ページ: 現在の設定値と変更方法 (表示専用。変更は CLI / Slack)。 */
+/** 設定ページ: 起動後に反映できる運用設定だけ編集可能にする。 */
 export function buildSettingsView(db: Db, info: SettingsViewInfo = {}): SettingsRow[] {
   const owner = getSetting(db, "owner_slack_id");
   const rows: SettingsRow[] = [
     {
-      label: "working hours",
-      value: `${getWorkStart(db)} - ${getWorkEnd(db)}`,
-      hint: "manaiger config --work-start 09:30 --work-end 18:30",
+      label: "作業開始時刻",
+      value: getWorkStart(db),
+      hint: "開始確認の基準時刻",
+      input: { name: "workStart", type: "time" },
     },
     {
-      label: "通知の最小間隔",
-      value: `${getSetting(db, "interaction_spacing_min") ?? "20"} 分`,
+      label: "作業終了時刻",
+      value: getWorkEnd(db),
+      hint: "終了確認の基準時刻",
+      input: { name: "workEnd", type: "time" },
+    },
+    {
+      label: "連続確認の最小間隔",
+      value: String(getInteractionSpacingMin(db)),
       hint: "連続で確認を送らないためのガード",
+      input: { name: "interactionSpacingMin", type: "number", min: "1", max: "240", step: "1" },
     },
     {
       label: "未応答の再確認まで",
-      value: `${getSetting(db, "recheck_after_min") ?? "30"} 分`,
+      value: String(getRecheckAfterMin(db)),
       hint: "再確認は 1 回だけ送られます",
+      input: { name: "recheckAfterMin", type: "number", min: "1", max: "240", step: "1" },
     },
     {
       label: "オーナー (Slack)",
