@@ -28,13 +28,27 @@ export function loadDotEnv(cwd: string = process.cwd()): void {
         const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
         if (!m) continue;
         const key = m[1]!;
-        const value = m[2]!.replace(/^["']|["']$/g, "");
+        const value = parseDotEnvValue(m[2]!);
         if (process.env[key] === undefined) process.env[key] = value;
       }
     } catch {
       /* .env が読めなくても起動は続ける */
     }
   }
+}
+
+function parseDotEnvValue(raw: string): string {
+  const trimmed = raw.trim();
+  const quote = trimmed[0];
+  if (quote === "\"" || quote === "'") {
+    for (let i = 1; i < trimmed.length; i++) {
+      if (trimmed[i] === quote && trimmed[i - 1] !== "\\") {
+        return trimmed.slice(1, i);
+      }
+    }
+  }
+  const commentStart = trimmed.startsWith("#") ? 0 : trimmed.search(/\s+#/);
+  return (commentStart === -1 ? trimmed : trimmed.slice(0, commentStart)).trimEnd();
 }
 
 function resolveHome(): string {

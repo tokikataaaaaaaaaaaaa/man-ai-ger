@@ -222,13 +222,23 @@ export function approveCandidate(db: Db, candidate: Candidate, now: Date = new D
     ? upsertObject(db, { type: "Project", name: candidate.project, now }).object.id
     : ensureInbox(db, now);
   upsertLink(db, task.object.id, "belongs_to", projectId, now);
-  recordEvent(
-    db,
-    "task_created",
-    `タスク「${task.object.name}」を追加 (Slack 候補から承認)`,
-    { id: task.object.id, candidateId: candidate.id, due: candidate.due },
-    now,
-  );
+  if (task.created) {
+    recordEvent(
+      db,
+      "task_created",
+      `タスク「${task.object.name}」を追加 (Slack 候補から承認)`,
+      { id: task.object.id, candidateId: candidate.id, due: candidate.due },
+      now,
+    );
+  } else {
+    recordEvent(
+      db,
+      "task_updated",
+      `既存タスク「${task.object.name}」に Slack 候補を紐づけ`,
+      { id: task.object.id, candidateId: candidate.id, due: candidate.due },
+      now,
+    );
+  }
   recordEvent(
     db,
     "task_candidate_approved",
@@ -237,7 +247,9 @@ export function approveCandidate(db: Db, candidate: Candidate, now: Date = new D
     now,
   );
   const due = candidate.due ? ` (締切: ${candidate.due})` : "";
-  return `📋 タスク「${task.object.name}」を追加しました${due}`;
+  return task.created
+    ? `📋 タスク「${task.object.name}」を追加しました${due}`
+    : `📋 既存タスク「${task.object.name}」に紐づけました${due}`;
 }
 
 /** 候補を却下する。 */

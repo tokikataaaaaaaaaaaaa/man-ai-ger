@@ -84,6 +84,37 @@ describe("task candidates", () => {
     expect(eventsOnDate(db, localDate()).map((e) => e.kind)).toContain("task_candidate_approved");
   });
 
+  it("既存 Task に紐づく候補承認は task_created を重複記録しない", async () => {
+    const llm = new FakeLlm([
+      triage({ task: true, name: "API をレビューする", project: "改修", due: null }),
+      triage({ task: true, name: "API をレビューする", project: "改修", due: null }),
+    ]);
+    const first = (await detectCandidate(
+      db,
+      llm,
+      { channel: "C123", author: "U1", text: "<@U_OWNER> API見てください" },
+      [],
+      new Date("2026-07-08T10:00:00"),
+    ))!;
+    approveCandidate(db, first, new Date("2026-07-08T10:01:00"));
+    const second = (await detectCandidate(
+      db,
+      llm,
+      { channel: "C456", author: "U2", text: "<@U_OWNER> APIレビューお願いします" },
+      [],
+      new Date("2026-07-08T11:00:00"),
+    ))!;
+
+    const footnote = approveCandidate(db, second, new Date("2026-07-08T11:01:00"));
+
+    expect(footnote).toContain("既存タスク「API をレビューする」に紐づけました");
+    expect(listPendingCandidates(db)).toEqual([]);
+    const kinds = eventsOnDate(db, "2026-07-08").map((e) => e.kind);
+    expect(kinds.filter((k) => k === "task_created")).toHaveLength(1);
+    expect(kinds.filter((k) => k === "task_updated")).toHaveLength(1);
+    expect(kinds.filter((k) => k === "task_candidate_approved")).toHaveLength(2);
+  });
+
   it("reject した候補は Task を作らず pending から消える", async () => {
     const llm = new FakeLlm([
       triage({ task: true, name: "不要な相談を確認する", project: null, due: null }),
