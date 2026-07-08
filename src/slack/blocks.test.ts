@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   textBlocks,
+  candidateDecisionQuickReplies,
   quickReplyBlock,
+  parseCandidateCommand,
   taskChoiceQuickReplies,
   recapQuickReplies,
   followUpQuickReplies,
@@ -80,6 +82,34 @@ describe("quickReply", () => {
   it("通常返信: 補足確認の文には夕方用ボタンを付ける", () => {
     const replies = followUpQuickReplies("補足はありますか？");
     expect(replies.map((r) => r.label)).toEqual(["特になし", "今日は休みにする"]);
+  });
+
+  it("タスク候補: 表示ラベルは日本語の判断だけにする", () => {
+    const replies = candidateDecisionQuickReplies("candidate-1");
+    expect(replies.map((r) => r.label)).toEqual([
+      "タスク化する",
+      "内容を修正",
+      "タスク化しない",
+    ]);
+    expect(replies.map((r) => r.label).join(" ")).not.toMatch(/task_candidate|approval_required|Slack option/);
+    expect(validateBlocks([quickReplyBlock(replies)!])).toEqual([]);
+  });
+
+  it("タスク候補: button value は内部コマンドとして parse できる", () => {
+    const replies = candidateDecisionQuickReplies("candidate-1");
+    expect(parseCandidateCommand(replies[0]!.value!)).toEqual({
+      decision: "approve",
+      candidateId: "candidate-1",
+    });
+    expect(parseCandidateCommand(replies[1]!.value!)).toEqual({
+      decision: "revise",
+      candidateId: "candidate-1",
+    });
+    expect(parseCandidateCommand(replies[2]!.value!)).toEqual({
+      decision: "reject",
+      candidateId: "candidate-1",
+    });
+    expect(parseCandidateCommand("タスク化する")).toBeNull();
   });
 });
 

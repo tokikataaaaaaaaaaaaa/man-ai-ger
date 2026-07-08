@@ -48,6 +48,13 @@ export interface QuickReply {
   value?: string;
 }
 
+export type CandidateDecision = "approve" | "revise" | "reject";
+
+export interface CandidateCommand {
+  decision: CandidateDecision;
+  candidateId: string;
+}
+
 /** 定型回答ボタンの actions ブロック。空配列なら null。 */
 export function quickReplyBlock(replies: QuickReply[]): SlackBlock | null {
   const items = replies.slice(0, ACTIONS_ELEMENTS_MAX);
@@ -79,6 +86,25 @@ export function recapQuickReplies(): QuickReply[] {
     { label: "特になし", value: "特になし" },
     { label: "今日は休みにする", value: "今日は休みにします" },
   ];
+}
+
+function candidateValue(decision: CandidateDecision, candidateId: string): string {
+  return `manaiger:candidate:${decision}:${candidateId}`;
+}
+
+/** タスク候補の承認ボタン。表示名に内部状態名を出さない。 */
+export function candidateDecisionQuickReplies(candidateId: string): QuickReply[] {
+  return [
+    { label: "タスク化する", value: candidateValue("approve", candidateId) },
+    { label: "内容を修正", value: candidateValue("revise", candidateId) },
+    { label: "タスク化しない", value: candidateValue("reject", candidateId) },
+  ];
+}
+
+export function parseCandidateCommand(value: string): CandidateCommand | null {
+  const m = /^manaiger:candidate:(approve|revise|reject):(.+)$/.exec(value);
+  if (!m) return null;
+  return { decision: m[1] as CandidateDecision, candidateId: m[2]! };
 }
 
 /**

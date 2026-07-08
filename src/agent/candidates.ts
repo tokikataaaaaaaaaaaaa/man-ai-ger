@@ -176,6 +176,40 @@ export function reviseCandidate(
   return revised;
 }
 
+export function parseCandidateRevisionText(text: string): {
+  name?: string;
+  project?: string | null;
+  due?: string | null;
+} {
+  const patch: { name?: string; project?: string | null; due?: string | null } = {};
+  const parts = text
+    .split(/\n|\/|、/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  let sawLabel = false;
+  for (const part of parts) {
+    const m = /^(タスク名|名前|name|task|project|プロジェクト|due|期限|締切)\s*[:：]\s*(.+)$/i.exec(part);
+    if (!m) continue;
+    sawLabel = true;
+    const key = m[1]!.toLowerCase();
+    const value = m[2]!.trim();
+    if (!value) continue;
+    if (key === "タスク名" || key === "名前" || key === "name" || key === "task") {
+      patch.name = value;
+    } else if (key === "project" || key === "プロジェクト") {
+      patch.project = value === "なし" || value.toLowerCase() === "null" ? null : value;
+    } else if (key === "due" || key === "期限" || key === "締切") {
+      if (value === "なし" || value.toLowerCase() === "null") patch.due = null;
+      else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) patch.due = value;
+    }
+  }
+  if (!sawLabel && !patch.name && !patch.project && !patch.due) {
+    const trimmed = text.trim();
+    if (trimmed) patch.name = trimmed;
+  }
+  return patch;
+}
+
 /** 候補を承認して Task を作成する。戻り値はユーザーに見せる脚注。 */
 export function approveCandidate(db: Db, candidate: Candidate, now: Date = new Date()): string {
   const task = upsertObject(db, {

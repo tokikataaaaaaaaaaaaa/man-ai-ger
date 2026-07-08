@@ -18,6 +18,10 @@ export function setSetting(db: Db, key: string, value: string): void {
   ).run(key, value);
 }
 
+export function deleteSetting(db: Db, key: string): void {
+  db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+}
+
 // --- 型付きヘルパ -----------------------------------------------------------
 
 export const DEFAULT_WORK_START = "09:00";

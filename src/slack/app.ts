@@ -10,15 +10,27 @@ const { App, LogLevel } = pkg;
 import type { Db } from "../db/client.js";
 import type { LlmClient } from "../llm/types.js";
 import type { Logger } from "../log.js";
-import { processTurn } from "../agent/run-turn.js";
+import { buildContext, processTurn } from "../agent/run-turn.js";
 import { listActiveTasks } from "../db/objects.js";
-import { getOwnerSlackId, setOwnerSlackId } from "../db/settings.js";
+import { deleteSetting, getOwnerSlackId, getSetting, setOwnerSlackId, setSetting } from "../db/settings.js";
 import {
+  approveCandidate,
+  detectCandidate,
+  getCandidate,
+  parseCandidateRevisionText,
+  rejectCandidate,
+  reviseCandidate,
+  type Candidate,
+} from "../agent/candidates.js";
+import {
+  candidateDecisionQuickReplies,
   textBlocks,
   quickReplyBlock,
+  parseCandidateCommand,
   pressedBlocks,
   followUpQuickReplies,
   validateBlocks,
+  type CandidateCommand,
   type SlackBlock,
   type QuickReply,
 } from "./blocks.js";
@@ -37,6 +49,29 @@ export interface SlackRuntime {
   sendToOwner: (text: string, quickReplies?: QuickReply[]) => Promise<void>;
   start: () => Promise<void>;
   stop: () => Promise<void>;
+}
+
+const PENDING_CANDIDATE_REVISION_KEY = "pending_candidate_revision";
+
+export function isOwnerMention(text: string, ownerSlackId: string): boolean {
+  return text.includes(`<@${ownerSlackId}>`);
+}
+
+function renderCandidateProposal(candidate: Candidate): string {
+  return [
+    "このmentionをタスク化しますか？",
+    `提案: 「${candidate.name}」`,
+    `Project: ${candidate.project ?? "未設定"}`,
+    `Due: ${candidate.due ?? "未設定"}`,
+  ].join("\n");
+}
+
+function renderRevisionRequest(candidate: Candidate): string {
+  return [
+    `「${candidate.name}」の内容を修正します。`,
+    "修正後のタスク名を送ってください。",
+    "Project / Due も変える場合は `Project: ... / Due: YYYY-MM-DD` の形式で追記できます。",
+  ].join("\n");
 }
 
 export function createSlackApp(deps: SlackAppDeps): SlackRuntime {
@@ -77,12 +112,92 @@ export function createSlackApp(deps: SlackAppDeps): SlackRuntime {
   async function handleUserText(channel: string, text: string): Promise<void> {
     await enqueue(async () => {
       try {
+        const candidateCommand = parseCandidateCommand(text);
+        if (candidateCommand) {
+          await handleCandidateCommand(channel, candidateCommand);
+          return;
+        }
+
+        if (await handlePendingCandidateRevision(channel, text)) return;
+
         await processTurn({ db, llm }, { kind: "user", text }, async (reply) => {
           const replies = followUpQuickReplies(reply, listActiveTasks(db).map((t) => t.name));
           await post(channel, reply, replies);
         });
       } catch (err) {
         logger.error("turn failed", { err: String(err) });
+      }
+    });
+  }
+
+  async function handleCandidateCommand(
+    channel: string,
+    command: CandidateCommand,
+  ): Promise<void> {
+    const candidate = getCandidate(db, command.candidateId);
+    if (!candidate) {
+      await post(channel, "このタスク候補は処理済みです。");
+      return;
+    }
+
+    if (command.decision === "approve") {
+      deleteSetting(db, PENDING_CANDIDATE_REVISION_KEY);
+      const footnote = approveCandidate(db, candidate);
+      await post(channel, `タスク化しました。\n\n${footnote}`);
+      return;
+    }
+
+    if (command.decision === "reject") {
+      deleteSetting(db, PENDING_CANDIDATE_REVISION_KEY);
+      rejectCandidate(db, candidate);
+      await post(channel, "タスク化しませんでした。必要ならまた拾います。");
+      return;
+    }
+
+    setSetting(db, PENDING_CANDIDATE_REVISION_KEY, candidate.id);
+    await post(channel, renderRevisionRequest(candidate));
+  }
+
+  async function handlePendingCandidateRevision(channel: string, text: string): Promise<boolean> {
+    const candidateId = getSetting(db, PENDING_CANDIDATE_REVISION_KEY);
+    if (!candidateId) return false;
+    const candidate = getCandidate(db, candidateId);
+    if (!candidate) {
+      deleteSetting(db, PENDING_CANDIDATE_REVISION_KEY);
+      await post(channel, "このタスク候補は処理済みです。");
+      return true;
+    }
+    const patch = parseCandidateRevisionText(text);
+    if (!patch.name && patch.project === undefined && patch.due === undefined) {
+      await post(channel, "修正内容を読み取れませんでした。修正後のタスク名を1行で送ってください。");
+      return true;
+    }
+    const revised = reviseCandidate(db, candidate, patch);
+    deleteSetting(db, PENDING_CANDIDATE_REVISION_KEY);
+    await post(channel, renderCandidateProposal(revised), candidateDecisionQuickReplies(revised.id));
+    return true;
+  }
+
+  async function handleObservedSlackMessage(
+    channel: string,
+    author: string,
+    text: string,
+  ): Promise<void> {
+    await enqueue(async () => {
+      try {
+        const now = new Date();
+        const candidate = await detectCandidate(
+          db,
+          llm,
+          { channel, author, text },
+          buildContext(db, now).tree,
+          now,
+        );
+        if (!candidate) return;
+        logger.info("task candidate detected", { candidateId: candidate.id, channel, author });
+        await sendToOwner(renderCandidateProposal(candidate), candidateDecisionQuickReplies(candidate.id));
+      } catch (err) {
+        logger.error("candidate detection failed", { err: String(err), channel, author });
       }
     });
   }
@@ -97,10 +212,18 @@ export function createSlackApp(deps: SlackAppDeps): SlackRuntime {
       text?: string;
       channel?: string;
     };
-    if (m.channel_type !== "im") return; // DM のみ
     if (m.subtype || m.bot_id || !m.user || !m.channel) return; // bot/編集/システムは無視
     const text = (m.text ?? "").trim();
     if (!text) return;
+
+    if (m.channel_type !== "im") {
+      const owner = getOwnerSlackId(db);
+      if (!owner) return;
+      if (m.user === owner) return; // 自分の発話は候補化しない
+      if (!isOwnerMention(text, owner)) return;
+      await handleObservedSlackMessage(m.channel, m.user, text);
+      return;
+    }
 
     const owner = getOwnerSlackId(db);
     if (!owner) {
