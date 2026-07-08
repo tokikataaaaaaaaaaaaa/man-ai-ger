@@ -14,6 +14,8 @@ export interface Config {
   codexModel: string | null;
   slackBotToken: string | null;
   slackAppToken: string | null;
+  /** Dashboard (local web UI) のポート。127.0.0.1 でのみ listen する。 */
+  dashboardPort: number;
 }
 
 /** カレント → home の順に .env を読み、既存の env を上書きしない。 */
@@ -52,5 +54,11 @@ export function loadConfig(): Config {
     codexModel: process.env.MANAIGER_CODEX_MODEL ?? null,
     slackBotToken: process.env.SLACK_BOT_TOKEN ?? null,
     slackAppToken: process.env.SLACK_APP_TOKEN ?? null,
+    dashboardPort: parsePort(process.env.MANAIGER_DASHBOARD_PORT, 7799),
   };
+}
+
+function parsePort(v: string | undefined, fallback: number): number {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : fallback;
 }

@@ -8,7 +8,7 @@ Slack の mention / DM からタスク候補を拾い、ユーザーに Slack DM
 
 - **ローカルファースト**: データはあなたのマシンの SQLite から出ません
 - **新しいデータ経路ゼロ**: 外部通信は Slack と Codex App Server に限定します。API キーをアプリに持たせません
-- **Dashboard 必須**: `docs/dashboard-prototype.html` を原案に、仕事の現在地を一目で確認できる画面を作ります
+- **Dashboard**: daemon 起動中は `http://127.0.0.1:7799/` で仕事の現在地を一目で確認できます (読み取り専用。操作は Slack Bot DM に渡されます)
 - **行動科学ベース**: 動機づけ面接 / 実装意図 / 小さな勝利の可視化 (docs/behavior-design.md)
 
 将来 (Phase B): 溜まった仕事文脈から、ワーカー AI (Claude Code 等) 向けの背景つき指示文を生成します。
@@ -56,7 +56,7 @@ bash scripts/setup-launchd.sh   # macOS launchd に登録 (ログイン時に自
 - **途中確認**: 進捗、詰まり、脱線、疲れを確認します
 - **終了時**: 完了、継続、延期、ブロッカー化のどれかに整理します
 - **やる気が出ない日**: 正直にそう書いてください。詰めません
-- **Dashboard**: `docs/dashboard-prototype.html` が現在の UI 原案です
+- **Dashboard**: `http://127.0.0.1:7799/` (`MANAIGER_DASHBOARD_PORT` で変更可)。`現在マネジメント中` / タスク分類 / Slack Context を確認できます
 
 ```bash
 pnpm cli status                     # ターミナルから現在地を見る

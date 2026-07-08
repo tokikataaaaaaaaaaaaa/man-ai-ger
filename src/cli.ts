@@ -5,6 +5,7 @@
  *   status : プロジェクト/タスクの現在地
  *   doctor : セットアップ状態の検査
  *   config : working hours の表示・変更
+ *   dashboard : local web dashboard
  */
 import { Command } from "commander";
 import { existsSync } from "node:fs";
@@ -24,6 +25,10 @@ import { loadConfig } from "./config.js";
 import { isHHMM } from "./util/dates.js";
 import { startDaemon } from "./daemon.js";
 import { CodexAppServerClient } from "./llm/codex.js";
+import type { LlmClient } from "./llm/types.js";
+import { createLogger } from "./log.js";
+import { startDashboardServer } from "./dashboard/server.js";
+import { createSlackApp } from "./slack/app.js";
 import type { TaskStatus } from "./db/types.js";
 
 const STATUS_ICON: Record<TaskStatus, string> = {
@@ -173,6 +178,61 @@ program
   });
 
 program
+  .command("dashboard")
+  .description("local web dashboard を起動する")
+  .option("--host <host>", "bind host", "127.0.0.1")
+  .option("--port <number>", "bind port", "4317")
+  .action(async (opts: { host: string; port: string }) => {
+    const port = parsePortOption(opts.port);
+    if (port === null) {
+      console.error(`port の形式が不正です: ${opts.port} (1-65535 の整数)`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const config = loadConfig();
+    const db = openDb(config.dbPath);
+    const codex = new CodexAppServerClient({
+      codexPath: config.codexPath,
+      model: config.codexModel ?? undefined,
+      cwd: config.home,
+      timeoutMs: 5_000,
+    });
+    const codexAvailable = await codex.checkAvailable(5_000);
+    codex.stop();
+
+    const logger = createLogger(config.logPath);
+    const slack =
+      config.slackBotToken && config.slackAppToken
+        ? createSlackApp({
+            db,
+            logger,
+            botToken: config.slackBotToken,
+            appToken: config.slackAppToken,
+            llm: dashboardOnlyLlm(),
+          })
+        : null;
+
+    const server = await startDashboardServer({
+      db,
+      host: opts.host,
+      port,
+      codexAvailable,
+      slackConfigured: Boolean(config.slackBotToken && config.slackAppToken),
+      ...(slack ? { sendToOwner: slack.sendToOwner } : {}),
+    });
+    console.log(`Dashboard: ${server.url}`);
+
+    const shutdown = async (): Promise<void> => {
+      await server.stop().catch(() => undefined);
+      await slack?.stop().catch(() => undefined);
+      process.exit(0);
+    };
+    process.on("SIGINT", () => void shutdown());
+    process.on("SIGTERM", () => void shutdown());
+  });
+
+program
   .command("config")
   .description("設定の表示・変更 (例: manaiger config --work-start 08:30)")
   .option("--work-start <HH:MM>", "勤務開始時刻")
@@ -233,6 +293,20 @@ function parseMinutesOption(raw: string): number | null {
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 240) return null;
   return n;
+}
+
+function parsePortOption(raw: string): number | null {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 65_535) return null;
+  return n;
+}
+
+function dashboardOnlyLlm(): LlmClient {
+  return {
+    complete: async () => {
+      throw new Error("dashboard command does not process Slack messages");
+    },
+  };
 }
 
 program.parseAsync().catch((err) => {

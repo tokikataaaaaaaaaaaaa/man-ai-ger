@@ -11,6 +11,7 @@ import { createSlackApp } from "./slack/app.js";
 import { startScheduler } from "./flows/scheduler.js";
 import { processTurn } from "./agent/run-turn.js";
 import { followUpQuickReplies } from "./slack/blocks.js";
+import { startDashboardServer, type DashboardServerHandle } from "./dashboard/server.js";
 import { mkdirSync } from "node:fs";
 
 export async function startDaemon(): Promise<void> {
@@ -66,10 +67,31 @@ export async function startDaemon(): Promise<void> {
     },
   });
 
+  // Dashboard (local web UI)。Codex の利用可否は起動時に 1 回検査してキャッシュし、
+  // snapshot 生成のたびに App Server を叩かない。
+  let codexAvailable: boolean | null = null;
+  let dashboard: DashboardServerHandle | null = null;
+  try {
+    dashboard = await startDashboardServer({
+      db,
+      port: config.dashboardPort,
+      slackConfigured: true,
+      get codexAvailable() {
+        return codexAvailable;
+      },
+      sendToOwner: (text, quickReplies) => slack.sendToOwner(text, quickReplies),
+    });
+    logger.info("dashboard started", { url: dashboard.url });
+  } catch (err) {
+    // Dashboard が立たなくても Slack Bot は動かし続ける (ポート競合等)
+    logger.error("dashboard start failed", { err: String(err), port: config.dashboardPort });
+  }
+
   const shutdown = async (): Promise<void> => {
     logger.info("shutting down");
     scheduler.stop();
     llm.stop();
+    await dashboard?.stop().catch(() => undefined);
     await slack.stop().catch(() => undefined);
     process.exit(0);
   };
@@ -78,9 +100,13 @@ export async function startDaemon(): Promise<void> {
 
   await slack.start();
   logger.info("manaiger daemon started", { codexPath: config.codexPath, home: config.home });
+  void llm.checkAvailable().then((ok) => {
+    codexAvailable = ok;
+    if (!ok) logger.error("Codex App Server が利用できません (`manaiger doctor` で確認してください)");
+  });
   // オーナー未登録の案内 (初回のみの体験を明確に)
   // eslint-disable-next-line no-console
   console.log(
-    "\nMan.Ai.ger が起動しました。Slack で Bot に DM を送ると、その人がオーナーとして登録されます。\n",
+    `\nMan.Ai.ger が起動しました。Slack で Bot に DM を送ると、その人がオーナーとして登録されます。\nDashboard: ${dashboard?.url ?? "(起動失敗)"}\n`,
   );
 }
