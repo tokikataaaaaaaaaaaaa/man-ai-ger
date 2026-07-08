@@ -40,39 +40,54 @@ Slack の mention / DM からタスク候補を拾い、Slack DM で「タスク
 3. **Basic Information → App-Level Tokens** → Generate Token (`connections:write` スコープ) → `xapp-...` を控える
 4. **Install App** → ワークスペースにインストール → **OAuth & Permissions** の `xoxb-...` (Bot User OAuth Token) を控える
 
-`slack-manifest.yaml` を使えば上記4手順だけで済みます。社内ポリシーで manifest からの作成が禁止されている場合や、設定内容を個別に確認したい場合は、以下を手動で設定してください。
+`slack-manifest.yaml` を使えば上記4手順だけで済みます。この manifest には以下のスコープ・イベントがすべて含まれています (社内ポリシーで manifest からの作成が禁止されている場合は、次項を見て手動で設定してください)。
 
-<details>
-<summary>手動で設定する場合 (manifest を使わないとき)</summary>
-
-**OAuth & Permissions → Scopes → Bot Token Scopes** に以下を追加:
+**Bot Token Scopes** (OAuth & Permissions):
 
 | Scope | 用途 |
 |---|---|
 | `chat:write` | DM の送信 |
 | `im:history` | 自分宛て DM の受信 (`message.im` イベントに必要) |
-| `im:write` | DM チャンネルを開く (`conversations.open`) |
+| `im:write` | DM チャンネルを開く (`conversations.open`)。**これが無いと Bot からの最初の DM 送信に失敗します** |
 | `channels:history` | Bot 参加済み public channel での owner mention 観測 |
 | `groups:history` | Bot 参加済み private channel での owner mention 観測 |
+
+**App-Level Token Scope** (Basic Information → App-Level Tokens):
+
+| Scope | 用途 |
+|---|---|
+| `connections:write` | Socket Mode での接続 (Event Subscriptions / Interactivity を Request URL なしで受信する) |
+
+**Event Subscriptions** (Subscribe to bot events):
+
+| Event | 用途 |
+|---|---|
+| `message.im` | Bot への DM を受信する (必須) |
+| `message.channels` | Bot が参加している public channel でのメッセージを観測する (owner mention 検出用) |
+| `message.groups` | Bot が参加している private channel でのメッセージを観測する (owner mention 検出用) |
+
+**Interactivity & Shortcuts**: 有効化が必要です (承認ボタン `タスク化する` / `内容を修正` / `タスク化しない` などのブロック操作に使います)。
+
+<details>
+<summary>手動で設定する場合 (manifest を使わないとき)</summary>
+
+**OAuth & Permissions → Scopes → Bot Token Scopes** に上記5つの Scope を追加。
 
 **Socket Mode を有効化** (Settings → Socket Mode):
 
 1. **Enable Socket Mode** をオンにする
-2. トークン名を入力して **Generate** → スコープに `connections:write` が自動で付く App-Level Token (`xapp-...`) が発行される
-3. この画面をオンにしないと、後述の Event Subscriptions が有効化できません
+2. トークン名を入力して **Generate** → 上記の `connections:write` が自動で付く App-Level Token (`xapp-...`) が発行される
+3. この画面をオンにしないと、Event Subscriptions が有効化できません
 
 **Event Subscriptions を有効化** (Features → Event Subscriptions):
 
 1. **Enable Events** をオンにする
-2. **Subscribe to bot events** に以下を追加:
-   - `message.im` — Bot への DM を受信する (必須)
-   - `message.channels` — Bot が参加している public channel でのメッセージを観測する (owner mention 検出用)
-   - `message.groups` — Bot が参加している private channel でのメッセージを観測する (owner mention 検出用)
+2. **Subscribe to bot events** に上記3つの Event を追加
 3. Socket Mode 使用時は Request URL の入力は不要です (Event Subscriptions は Socket Mode 経由で配信されます)
 
 **Interactivity & Shortcuts を有効化** (Features → Interactivity & Shortcuts):
 
-1. **Interactivity** をオンにする (承認ボタン `タスク化する` / `内容を修正` / `タスク化しない` などのブロック操作に必要)
+1. **Interactivity** をオンにする
 2. こちらも Socket Mode 使用時は Request URL 不要です
 
 設定後、**Install App** から (再) インストールしてスコープ変更を反映させてください。
