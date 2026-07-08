@@ -2,11 +2,18 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Db } from "../db/client.js";
 import type { LlmClient } from "../llm/types.js";
 import { listByType } from "../db/objects.js";
+import {
+  getInteractionSpacingMin,
+  getRecheckAfterMin,
+  getWorkEnd,
+  getWorkStart,
+  setSetting,
+} from "../db/settings.js";
 import { listPendingCandidates, type Candidate } from "../agent/candidates.js";
 import { handleCoachingIntent, parseCoachingIntent } from "../agent/coaching.js";
 import { processTurn } from "../agent/run-turn.js";
 import { followUpQuickReplies, candidateDecisionQuickReplies, type QuickReply } from "../slack/blocks.js";
-import { localDate } from "../util/dates.js";
+import { hhmmToMinutes, isHHMM, localDate } from "../util/dates.js";
 import type { WorkObject } from "../db/types.js";
 import {
   buildDashboardSnapshot,
@@ -94,6 +101,12 @@ async function handleRequest(
       sendJson(res, 200, result);
       return;
     }
+    if (req.method === "POST" && url.pathname === "/api/settings") {
+      const body = await readJsonBody(req);
+      const result = updateDashboardSettings(opts.db, body);
+      sendJson(res, 200, result);
+      return;
+    }
     sendJson(res, 404, { error: "not_found" });
   } catch (err) {
     const status = err instanceof DashboardIntentError ? err.status : 500;
@@ -102,6 +115,66 @@ async function handleRequest(
       message: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+export interface DashboardSettingsUpdateResult {
+  message: string;
+  settings: {
+    workStart: string;
+    workEnd: string;
+    interactionSpacingMin: number;
+    recheckAfterMin: number;
+  };
+}
+
+export function updateDashboardSettings(
+  db: Db,
+  body: Record<string, unknown>,
+): DashboardSettingsUpdateResult {
+  const workStart = stringValue(body.workStart);
+  const workEnd = stringValue(body.workEnd);
+  const interactionSpacingMin = minuteValue(body.interactionSpacingMin);
+  const recheckAfterMin = minuteValue(body.recheckAfterMin);
+  const errors: string[] = [];
+
+  if (!isHHMM(workStart)) errors.push("作業開始時刻は HH:MM 形式で入力してください。");
+  if (!isHHMM(workEnd)) errors.push("作業終了時刻は HH:MM 形式で入力してください。");
+  if (isHHMM(workStart) && isHHMM(workEnd) && hhmmToMinutes(workStart) >= hhmmToMinutes(workEnd)) {
+    errors.push("作業開始時刻は作業終了時刻より前にしてください。");
+  }
+  if (interactionSpacingMin === null) {
+    errors.push("連続確認の最小間隔は 1-240 分で入力してください。");
+  }
+  if (recheckAfterMin === null) {
+    errors.push("未応答の再確認までは 1-240 分で入力してください。");
+  }
+  if (errors.length > 0) throw new DashboardIntentError(400, errors.join("\n"));
+
+  setSetting(db, "work_start", workStart);
+  setSetting(db, "work_end", workEnd);
+  setSetting(db, "interaction_spacing_min", String(interactionSpacingMin));
+  setSetting(db, "recheck_after_min", String(recheckAfterMin));
+
+  return {
+    message: "設定を保存しました。",
+    settings: {
+      workStart: getWorkStart(db),
+      workEnd: getWorkEnd(db),
+      interactionSpacingMin: getInteractionSpacingMin(db),
+      recheckAfterMin: getRecheckAfterMin(db),
+    },
+  };
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function minuteValue(value: unknown): number | null {
+  const text = typeof value === "number" ? String(value) : stringValue(value);
+  if (!/^\d+$/.test(text)) return null;
+  const minutes = Number(text);
+  return Number.isInteger(minutes) && minutes >= 1 && minutes <= 240 ? minutes : null;
 }
 
 export async function handleDashboardIntent(

@@ -7,7 +7,7 @@ import { openDb, type Db } from "../db/client.js";
 import { upsertObject } from "../db/objects.js";
 import { upsertLink } from "../db/links.js";
 import { appendTurn } from "../db/turns.js";
-import { setSetting } from "../db/settings.js";
+import { getSetting, setSetting } from "../db/settings.js";
 import { buildTasksView, buildLogView, buildSettingsView } from "./snapshot.js";
 import { startDashboardServer, type DashboardServerHandle } from "./server.js";
 import { localDate } from "../util/dates.js";
@@ -108,6 +108,52 @@ describe("HTTP ルート", () => {
       expect(html).not.toContain("approval_required");
     }
   });
+
+  it("POST /api/settings で運用設定を SQLite settings に保存する", async () => {
+    handle = await startDashboardServer({
+      db,
+      port: 7956,
+      slackConfigured: false,
+      codexAvailable: true,
+    });
+
+    const res = await postJson(`${handle.url}api/settings`, {
+      workStart: "08:45",
+      workEnd: "17:30",
+      interactionSpacingMin: "35",
+      recheckAfterMin: "50",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe("設定を保存しました。");
+    expect(getSetting(db, "work_start")).toBe("08:45");
+    expect(getSetting(db, "work_end")).toBe("17:30");
+    expect(getSetting(db, "interaction_spacing_min")).toBe("35");
+    expect(getSetting(db, "recheck_after_min")).toBe("50");
+  });
+
+  it("POST /api/settings は不正値を拒否し、既存設定を保持する", async () => {
+    setSetting(db, "work_start", "09:00");
+    handle = await startDashboardServer({
+      db,
+      port: 7957,
+      slackConfigured: false,
+      codexAvailable: true,
+    });
+
+    const res = await postJson(`${handle.url}api/settings`, {
+      workStart: "25:00",
+      workEnd: "17:30",
+      interactionSpacingMin: "0",
+      recheckAfterMin: "50",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("作業開始時刻");
+    expect(res.body.message).toContain("連続確認の最小間隔");
+    expect(getSetting(db, "work_start")).toBe("09:00");
+    expect(getSetting(db, "work_end")).toBeNull();
+  });
 });
 
 /** localhost への GET (テスト専用。製品コードの外部通信ではない)。 */
@@ -120,6 +166,40 @@ function get(url: string): Promise<string> {
         res.on("data", (c: string) => (body += c));
         res.on("end", () => resolve(body));
       }).on("error", reject);
+    });
+  });
+}
+
+function postJson(url: string, payload: unknown): Promise<{ status: number; body: Record<string, string> }> {
+  return new Promise((resolve, reject) => {
+    import("node:http").then(({ request }) => {
+      const target = new URL(url);
+      const body = JSON.stringify(payload);
+      const req = request(
+        {
+          hostname: target.hostname,
+          port: target.port,
+          path: target.pathname,
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "content-length": Buffer.byteLength(body),
+          },
+        },
+        (res) => {
+          let text = "";
+          res.setEncoding("utf8");
+          res.on("data", (c: string) => (text += c));
+          res.on("end", () => {
+            resolve({
+              status: res.statusCode ?? 0,
+              body: JSON.parse(text || "{}") as Record<string, string>,
+            });
+          });
+        },
+      );
+      req.on("error", reject);
+      req.end(body);
     });
   });
 }
