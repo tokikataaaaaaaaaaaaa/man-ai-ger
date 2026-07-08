@@ -1,13 +1,16 @@
 /**
- * daemon = Slack 接続 + スケジューラ + エージェントの合成 (architecture.md §1)。
+ * daemon = Slack 接続 + スケジューラ + Dashboard の合成 (architecture.md §1)。
  * `manaiger start` から起動される。launchd はこれを常駐させる。
+ *
+ * Slack トークン未設定でも Dashboard だけは起動する (縮退起動)。
+ * Service 表示が「Slack連携: 未設定」を示し、ユーザーが次の一手を判断できる。
  */
 import { openDb } from "./db/client.js";
 import { acquireDaemonLock } from "./db/settings.js";
 import { CodexAppServerClient } from "./llm/codex.js";
 import { createLogger } from "./log.js";
 import { loadConfig } from "./config.js";
-import { createSlackApp } from "./slack/app.js";
+import { createSlackApp, type SlackRuntime } from "./slack/app.js";
 import { startScheduler } from "./flows/scheduler.js";
 import { processTurn } from "./agent/run-turn.js";
 import { followUpQuickReplies } from "./slack/blocks.js";
@@ -19,12 +22,11 @@ export async function startDaemon(): Promise<void> {
   mkdirSync(config.home, { recursive: true });
   const logger = createLogger(config.logPath);
 
-  if (!config.slackBotToken || !config.slackAppToken) {
+  const slackConfigured = Boolean(config.slackBotToken && config.slackAppToken);
+  if (!slackConfigured) {
     logger.error(
-      "SLACK_BOT_TOKEN / SLACK_APP_TOKEN が未設定です。README のセットアップ手順をご確認ください (`manaiger doctor` で状態確認できます)",
+      "SLACK_BOT_TOKEN / SLACK_APP_TOKEN が未設定です。Dashboard のみで起動します (`manaiger doctor` で状態確認できます)",
     );
-    process.exitCode = 1;
-    return;
   }
 
   const db = openDb(config.dbPath);
@@ -47,25 +49,30 @@ export async function startDaemon(): Promise<void> {
     model: config.codexModel ?? undefined,
     cwd: config.home,
   });
-  const slack = createSlackApp({
-    db,
-    llm,
-    logger,
-    botToken: config.slackBotToken,
-    appToken: config.slackAppToken,
-  });
 
-  const scheduler = startScheduler({
-    db,
-    onError: (err) => logger.error("scheduler kick failed", { err: String(err) }),
-    runKick: async (input) => {
-      logger.info("kick", { kind: input.kind });
-      await processTurn({ db, llm }, input, async (text) => {
-        const quickReplies = followUpQuickReplies(text);
-        await slack.sendToOwner(text, quickReplies);
-      });
-    },
-  });
+  let slack: SlackRuntime | null = null;
+  let scheduler: { stop: () => void } | null = null;
+  if (slackConfigured) {
+    slack = createSlackApp({
+      db,
+      llm,
+      logger,
+      botToken: config.slackBotToken!,
+      appToken: config.slackAppToken!,
+    });
+    const slackRef = slack;
+    scheduler = startScheduler({
+      db,
+      onError: (err) => logger.error("scheduler kick failed", { err: String(err) }),
+      runKick: async (input) => {
+        logger.info("kick", { kind: input.kind });
+        await processTurn({ db, llm }, input, async (text) => {
+          const quickReplies = followUpQuickReplies(text);
+          await slackRef.sendToOwner(text, quickReplies);
+        });
+      },
+    });
+  }
 
   // Dashboard (local web UI)。Codex の利用可否は起動時に 1 回検査してキャッシュし、
   // snapshot 生成のたびに App Server を叩かない。
@@ -75,11 +82,13 @@ export async function startDaemon(): Promise<void> {
     dashboard = await startDashboardServer({
       db,
       port: config.dashboardPort,
-      slackConfigured: true,
+      slackConfigured,
       get codexAvailable() {
         return codexAvailable;
       },
-      sendToOwner: (text, quickReplies) => slack.sendToOwner(text, quickReplies),
+      ...(slack
+        ? { sendToOwner: (text: string, quickReplies?: Parameters<SlackRuntime["sendToOwner"]>[1]) => slack.sendToOwner(text, quickReplies) }
+        : {}),
     });
     logger.info("dashboard started", { url: dashboard.url });
   } catch (err) {
@@ -89,24 +98,30 @@ export async function startDaemon(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     logger.info("shutting down");
-    scheduler.stop();
+    scheduler?.stop();
     llm.stop();
     await dashboard?.stop().catch(() => undefined);
-    await slack.stop().catch(() => undefined);
+    await slack?.stop().catch(() => undefined);
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 
-  await slack.start();
-  logger.info("manaiger daemon started", { codexPath: config.codexPath, home: config.home });
+  if (slack) await slack.start();
+  logger.info("manaiger daemon started", {
+    codexPath: config.codexPath,
+    home: config.home,
+    slackConfigured,
+  });
   void llm.checkAvailable().then((ok) => {
     codexAvailable = ok;
     if (!ok) logger.error("Codex App Server が利用できません (`manaiger doctor` で確認してください)");
   });
-  // オーナー未登録の案内 (初回のみの体験を明確に)
+
+  // 起動体験の案内 (状態に応じて次の一手を変える)
+  const nextStep = slackConfigured
+    ? "Slack で Bot に DM を送ると、その人がオーナーとして登録されます。"
+    : "Slack 連携は未設定です。README の手順で Slack App を作成し .env にトークンを設定すると、Bot が動き始めます。";
   // eslint-disable-next-line no-console
-  console.log(
-    `\nMan.Ai.ger が起動しました。Slack で Bot に DM を送ると、その人がオーナーとして登録されます。\nDashboard: ${dashboard?.url ?? "(起動失敗)"}\n`,
-  );
+  console.log(`\nMan.Ai.ger が起動しました。${nextStep}\nDashboard: ${dashboard?.url ?? "(起動失敗)"}\n`);
 }
