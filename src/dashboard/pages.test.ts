@@ -46,6 +46,14 @@ describe("buildTasksView", () => {
     expect(item?.statusLabel).toBe("延期中");
     expect(item?.deferredUntil).toBe("2026-07-15");
   });
+
+  it("締切に時刻指定があれば dueTime を表示用に持つ", () => {
+    upsertObject(db, { type: "Task", name: "資料提出", due: "2026-07-10", dueTime: "17:00" });
+    const view = buildTasksView(db);
+    const item = view.active[0]?.tasks[0];
+    expect(item?.due).toBe("2026-07-10");
+    expect(item?.dueTime).toBe("17:00");
+  });
 });
 
 describe("buildLogView", () => {
@@ -80,6 +88,7 @@ describe("HTTP ルート", () => {
 
   it("/tasks /log /settings が 200 で、ナビの active が切り替わる", async () => {
     upsertObject(db, { type: "Task", name: "画面実装", status: "todo" });
+    upsertObject(db, { type: "Task", name: "資料提出", due: "2026-07-10", dueTime: "17:00" });
     appendTurn(db, "user", "テスト発話");
     handle = await startDashboardServer({
       db,
@@ -92,6 +101,7 @@ describe("HTTP ルート", () => {
     const tasks = await get(`${handle.url}tasks`);
     expect(tasks).toContain("画面実装");
     expect(tasks).toContain('class="nav-item active" href="/tasks"');
+    expect(tasks).toContain("締切 2026-07-10 17:00"); // due_time は日付に併記する
 
     const log = await get(`${handle.url}log`);
     expect(log).toContain("テスト発話");

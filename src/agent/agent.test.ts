@@ -38,6 +38,21 @@ describe("applyActions", () => {
     ]);
   });
 
+  it("create_task に dueTime があれば締切の時刻として保存し、脚注に表示する", () => {
+    const notes = applyActions(db, [
+      { type: "create_task", name: "資料提出", project: null, due: "2026-07-03", dueTime: "17:00" },
+    ]);
+    expect(notes).toEqual(["📋 タスク「資料提出」を追加しました (締切: 2026-07-03 17:00)"]);
+    expect(getByName(db, "資料提出", "Task")?.dueTime).toBe("17:00");
+  });
+
+  it("due が無いのに dueTime だけ来ても無視する (時刻だけの締切は意味を持たない)", () => {
+    applyActions(db, [
+      { type: "create_task", name: "雑務2", project: null, due: null, dueTime: "17:00" },
+    ]);
+    expect(getByName(db, "雑務2", "Task")?.dueTime).toBeNull();
+  });
+
   it("project 指定なしの create_task は Inbox に入る", () => {
     applyActions(db, [{ type: "create_task", name: "雑務" }]);
     expect(getByName(db, "Inbox", "Project")).not.toBeNull();

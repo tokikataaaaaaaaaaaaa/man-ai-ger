@@ -19,10 +19,12 @@ import {
   detectCandidate,
   getCandidate,
   parseCandidateRevisionText,
+  parseDueReply,
   rejectCandidate,
   reviseCandidate,
   type Candidate,
 } from "../agent/candidates.js";
+import { formatDue } from "../agent/actions.js";
 import {
   candidateDecisionQuickReplies,
   textBlocks,
@@ -54,6 +56,7 @@ export interface SlackRuntime {
 }
 
 const PENDING_CANDIDATE_REVISION_KEY = "pending_candidate_revision";
+const PENDING_CANDIDATE_DUE_KEY = "pending_candidate_due";
 
 export function isOwnerMention(text: string, ownerSlackId: string): boolean {
   return text.includes(`<@${ownerSlackId}>`);
@@ -73,6 +76,14 @@ function renderRevisionRequest(candidate: Candidate): string {
     `「${candidate.name}」の内容を修正します。`,
     "修正後のタスク名を送ってください。",
     "Project / Due も変える場合は `Project: ... / Due: YYYY-MM-DD` の形式で追記できます。",
+  ].join("\n");
+}
+
+function renderDueRequest(candidate: Candidate): string {
+  return [
+    `「${candidate.name}」の締切はいつですか？`,
+    "例: 2026-07-10 / 2026-07-10 17:00 / 今日 / 明日 18:00",
+    "決まっていなければ「わからない」「なし」と送ってください。",
   ].join("\n");
 }
 
@@ -121,6 +132,7 @@ export function createSlackApp(deps: SlackAppDeps): SlackRuntime {
         }
 
         if (await handlePendingCandidateRevision(channel, text)) return;
+        if (await handlePendingCandidateDue(channel, text)) return;
 
         const coachingIntent = parseCoachingCommand(text);
         if (coachingIntent) {
@@ -151,6 +163,12 @@ export function createSlackApp(deps: SlackAppDeps): SlackRuntime {
 
     if (command.decision === "approve") {
       deleteSetting(db, PENDING_CANDIDATE_REVISION_KEY);
+      if (!candidate.due) {
+        // 締切未確定のまま承認しない: 先に締切を1問だけ聞いてから確定させる
+        setSetting(db, PENDING_CANDIDATE_DUE_KEY, candidate.id);
+        await post(channel, renderDueRequest(candidate));
+        return;
+      }
       const footnote = approveCandidate(db, candidate);
       await post(channel, `タスク化しました。\n\n${footnote}`);
       return;
@@ -165,6 +183,32 @@ export function createSlackApp(deps: SlackAppDeps): SlackRuntime {
 
     setSetting(db, PENDING_CANDIDATE_REVISION_KEY, candidate.id);
     await post(channel, renderRevisionRequest(candidate));
+  }
+
+  /** 締切確認への返信を待っている場合に処理する。該当しなければ false。 */
+  async function handlePendingCandidateDue(channel: string, text: string): Promise<boolean> {
+    const candidateId = getSetting(db, PENDING_CANDIDATE_DUE_KEY);
+    if (!candidateId) return false;
+    const candidate = getCandidate(db, candidateId);
+    if (!candidate) {
+      deleteSetting(db, PENDING_CANDIDATE_DUE_KEY);
+      await post(channel, "このタスク候補は処理済みです。");
+      return true;
+    }
+    const parsed = parseDueReply(text);
+    if (!parsed) {
+      await post(
+        channel,
+        "締切を読み取れませんでした。YYYY-MM-DD (例: 2026-07-10) か「今日」「明日」、時刻付きなら「明日 18:00」の形式で送ってください。決まっていなければ「わからない」でも大丈夫です。",
+      );
+      return true;
+    }
+    deleteSetting(db, PENDING_CANDIDATE_DUE_KEY);
+    const confirmed: Candidate = { ...candidate, due: parsed.due, dueTime: parsed.dueTime };
+    const footnote = approveCandidate(db, confirmed);
+    const dueLine = confirmed.due ? `\n締切: ${formatDue(confirmed.due, confirmed.dueTime)}` : "";
+    await post(channel, `タスク化しました。${dueLine}\n\n${footnote}`);
+    return true;
   }
 
   async function handlePendingCandidateRevision(channel: string, text: string): Promise<boolean> {

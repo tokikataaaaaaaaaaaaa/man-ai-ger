@@ -18,6 +18,7 @@ import {
   detectCandidate,
   approveCandidate,
   listPendingCandidates,
+  parseDueReply,
 } from "../src/agent/candidates.js";
 import { buildDashboardSnapshot } from "../src/dashboard/snapshot.js";
 import { handleDashboardIntent } from "../src/dashboard/server.js";
@@ -154,6 +155,42 @@ describe("シナリオ: mention → タスク候補 → 承認 → Dashboard 反
     const after = buildDashboardSnapshot(db, { now: at("11:46"), slackConfigured: true, codexAvailable: true });
     expect(after.metrics.find((m) => m.label === "タスク候補")?.count).toBe(0);
     expect(after.metrics.find((m) => m.label === "本日締め切り")?.count).toBe(1);
+  });
+
+  it("mention 検出時に締切の手がかりが無ければ、承認前に締切確認を挟んでからタスク化する", async () => {
+    // --- 1. 締切の手がかりが無いメッセージ → triage は due: null で候補化 --------
+    const triageLlm = new FakeLlm([
+      JSON.stringify({ task: true, name: "デザインレビューをする", project: null, due: null }),
+    ]);
+    const candidate = await detectCandidate(
+      db,
+      triageLlm,
+      { channel: "#design", author: "Sato", text: "この画面、時間があるときにレビューしてもらえますか？" },
+      buildContext(db, at("11:42")).tree,
+      at("11:42"),
+    );
+    expect(candidate).not.toBeNull();
+    expect(candidate!.due).toBeNull();
+
+    // --- 2. due が無いので、この場では承認しない (呼び出し側の実装契約) ---------
+    // slack/app.ts の handleCandidateCommand は candidate.due が null のとき
+    // approveCandidate を呼ばず、締切確認 (parseDueReply) を経由させる。
+    expect(getByName(db, "デザインレビューをする", "Task")).toBeNull();
+
+    // --- 3. ユーザーが締切を返信 → parseDueReply で確定 → そこで初めて承認 -----
+    const tomorrow = new Date(at("11:50"));
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const expectedDue = localDate(tomorrow);
+
+    const parsed = parseDueReply("明日 15:00", at("11:50"));
+    expect(parsed).toEqual({ due: expectedDue, dueTime: "15:00" });
+    const confirmed = { ...candidate!, due: parsed!.due, dueTime: parsed!.dueTime };
+    const footnote = approveCandidate(db, confirmed, at("11:51"));
+    expect(footnote).toContain("デザインレビューをする");
+
+    const task = getByName(db, "デザインレビューをする", "Task");
+    expect(task?.due).toBe(expectedDue);
+    expect(task?.dueTime).toBe("15:00");
   });
 
   it("Dashboard の相談ボタン intent は Slack DM フローを開始する", async () => {

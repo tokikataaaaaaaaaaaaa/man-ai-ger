@@ -10,6 +10,7 @@ import { z } from "zod";
 import { TASK_STATUSES } from "../db/types.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create_project"), name: z.string().trim().min(1).max(120) }),
@@ -18,6 +19,8 @@ const actionSchema = z.discriminatedUnion("type", [
     name: z.string().trim().min(1).max(200),
     project: z.string().trim().min(1).max(120).nullish(),
     due: z.string().regex(ISO_DATE).nullish(),
+    /** 締切の時刻 (HH:MM)。due が無いなら無視する (actions.ts 側で握りつぶす)。 */
+    dueTime: z.string().regex(HHMM).nullish(),
   }),
   z.object({
     type: z.literal("set_status"),

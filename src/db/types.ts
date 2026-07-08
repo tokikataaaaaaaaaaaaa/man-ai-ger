@@ -22,6 +22,8 @@ export interface WorkObject {
   status: TaskStatus | null;
   /** Task の締切 (ISO date)。無ければ null。 */
   due: string | null;
+  /** 締切の時刻 (HH:MM)。due が無いか、日付だけの締切なら null。 */
+  dueTime: string | null;
   createdAt: string;
   updatedAt: string;
 }

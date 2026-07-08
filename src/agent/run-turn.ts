@@ -65,6 +65,7 @@ export function buildContext(db: Db, now: Date): TurnContext {
         properties: {},
         status: null,
         due: null,
+        dueTime: null,
         createdAt: "",
         updatedAt: "",
       },

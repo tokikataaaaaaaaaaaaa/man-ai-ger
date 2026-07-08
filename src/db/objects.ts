@@ -15,6 +15,7 @@ interface Row {
   properties: string;
   status: string | null;
   due: string | null;
+  due_time: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -28,6 +29,7 @@ function toObject(r: Row): WorkObject {
     properties: safeParse(r.properties, {}),
     status: (r.status as TaskStatus | null) ?? null,
     due: r.due,
+    dueTime: r.due_time,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -70,6 +72,8 @@ export interface UpsertInput {
   properties?: Record<string, unknown>;
   status?: TaskStatus | null;
   due?: string | null;
+  /** 締切の時刻 (HH:MM)。due と一緒に与えたときだけ意味を持つ。 */
+  dueTime?: string | null;
   now?: Date;
 }
 
@@ -89,15 +93,16 @@ export function upsertObject(db: Db, input: UpsertInput): UpsertResult {
     const merged = { ...existing.properties, ...(input.properties ?? {}) };
     const status = input.status !== undefined ? input.status : existing.status;
     const due = input.due !== undefined ? input.due : existing.due;
+    const dueTime = input.dueTime !== undefined ? input.dueTime : existing.dueTime;
     db.prepare(
-      "UPDATE objects SET properties = ?, status = ?, due = ?, updated_at = ? WHERE id = ?",
-    ).run(JSON.stringify(merged), status, due, now, existing.id);
+      "UPDATE objects SET properties = ?, status = ?, due = ?, due_time = ?, updated_at = ? WHERE id = ?",
+    ).run(JSON.stringify(merged), status, due, dueTime, now, existing.id);
     return { object: getById(db, existing.id)!, created: false };
   }
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO objects (id, type, name, aliases, properties, status, due, created_at, updated_at)
-     VALUES (?, ?, ?, '[]', ?, ?, ?, ?, ?)`,
+    `INSERT INTO objects (id, type, name, aliases, properties, status, due, due_time, created_at, updated_at)
+     VALUES (?, ?, ?, '[]', ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.type,
@@ -105,6 +110,7 @@ export function upsertObject(db: Db, input: UpsertInput): UpsertResult {
     JSON.stringify(input.properties ?? {}),
     input.status ?? (input.type === "Task" ? "todo" : null),
     input.due ?? null,
+    input.dueTime ?? null,
     now,
     now,
   );

@@ -49,6 +49,30 @@ describe("objects", () => {
     expect(r.object.due).toBe("2026-07-01");
   });
 
+  it("due_time は締切の時刻指定として保存・維持される", () => {
+    const created = upsertObject(db, {
+      type: "Task",
+      name: "資料提出",
+      due: "2026-07-10",
+      dueTime: "17:00",
+    });
+    expect(created.object.dueTime).toBe("17:00");
+
+    // dueTime を与えない upsert では既存値を保持する
+    const kept = upsertObject(db, { type: "Task", name: "資料提出", properties: { note: "x" } });
+    expect(kept.object.dueTime).toBe("17:00");
+
+    // 明示的に null を与えれば時刻指定を外せる
+    const cleared = upsertObject(db, { type: "Task", name: "資料提出", dueTime: null });
+    expect(cleared.object.dueTime).toBeNull();
+  });
+
+  it("時刻指定のない締切は due_time が null のまま", () => {
+    const r = upsertObject(db, { type: "Task", name: "日付だけの締切", due: "2026-07-10" });
+    expect(r.object.due).toBe("2026-07-10");
+    expect(r.object.dueTime).toBeNull();
+  });
+
   it("setTaskStatus は before を返し、存在しないタスクなら null", () => {
     upsertObject(db, { type: "Task", name: "調査" });
     const r = setTaskStatus(db, "調査", "doing");
@@ -156,5 +180,51 @@ describe("settings", () => {
     // 「存在しない pid のロックは stale 扱いで奪取できる」ことを検証する
     setSetting(db, "daemon_lock", JSON.stringify({ pid: 999999, at: now }));
     expect(acquireDaemonLock(db, process.pid, now + 1000)).toBe(true);
+  });
+});
+
+describe("migrate (既存 DB への後方互換カラム追加)", () => {
+  it("due_time 列が無い旧スキーマの objects テーブルにも、openDb で自動的に列を追加する", async () => {
+    const { default: Database } = await import("better-sqlite3");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = mkdtempSync(join(tmpdir(), "manaiger-migrate-test-"));
+    const dbPath = join(dir, "manaiger.db");
+    try {
+      // due_time の無い旧スキーマを直接作り、既存タスクを1件入れておく
+      const legacy = new Database(dbPath);
+      legacy.exec(`
+        CREATE TABLE objects (
+          id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL,
+          aliases TEXT NOT NULL DEFAULT '[]', properties TEXT NOT NULL DEFAULT '{}',
+          status TEXT, due TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+      `);
+      legacy
+        .prepare(
+          `INSERT INTO objects (id, type, name, status, due, created_at, updated_at)
+           VALUES ('t1', 'Task', '既存タスク', 'todo', '2026-07-01', '2026-06-01T00:00:00+09:00', '2026-06-01T00:00:00+09:00')`,
+        )
+        .run();
+      legacy.close();
+
+      // openDb で開き直すと due_time が追加され、既存データは失われない
+      const migrated = openDb(dbPath);
+      const cols = migrated.prepare("PRAGMA table_info(objects)").all() as { name: string }[];
+      expect(cols.some((c) => c.name === "due_time")).toBe(true);
+
+      const existing = getByName(migrated, "既存タスク", "Task");
+      expect(existing?.due).toBe("2026-07-01");
+      expect(existing?.dueTime).toBeNull();
+
+      // 移行後も dueTime を新規に設定できる
+      upsertObject(migrated, { type: "Task", name: "既存タスク", dueTime: "09:30" });
+      expect(getByName(migrated, "既存タスク", "Task")?.dueTime).toBe("09:30");
+      migrated.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

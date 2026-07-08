@@ -15,6 +15,7 @@ import {
 } from "../db/settings.js";
 import type { TaskStatus, WorkObject } from "../db/types.js";
 import { listPendingCandidates, type Candidate } from "../agent/candidates.js";
+import { formatDue } from "../agent/actions.js";
 import { plannedChecksForTask } from "../flows/scheduler.js";
 import { hhmmToMinutes, localDate, localTime } from "../util/dates.js";
 import { recentTurnDates, turnsOnDate } from "../db/turns.js";
@@ -163,7 +164,7 @@ function buildCurrentContext(
   task: WorkObject,
   nextCheck: DashboardCurrent["nextCheck"],
 ): string {
-  const due = task.due ? `締切 ${task.due}。` : "";
+  const due = task.due ? `締切 ${formatDue(task.due, task.dueTime)}。` : "";
   if (!nextCheck) return `${due}次の確認予定はありません。Slackで相談すると再計画できます。`;
   return `${due}次は${nextCheck.time}に${nextCheck.label}。未応答なら1回だけ再確認します。`;
 }
@@ -355,6 +356,7 @@ export interface TaskPageItem {
   /** pill の色クラス (render 側でそのまま使う)。 */
   statusTone: "todo" | "doing" | "blocked" | "done" | "approval";
   due: string | null;
+  dueTime: string | null;
   deferredUntil: string | null;
 }
 
@@ -384,6 +386,7 @@ function toTaskPageItem(t: WorkObject): TaskPageItem {
     statusLabel: STATUS_LABEL[status],
     statusTone: STATUS_TONE[status],
     due: t.due,
+    dueTime: t.dueTime,
     deferredUntil: typeof props.deferred_until === "string" ? props.deferred_until : null,
   };
 }

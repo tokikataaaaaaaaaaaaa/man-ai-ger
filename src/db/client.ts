@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS objects (
   properties  TEXT NOT NULL DEFAULT '{}',
   status      TEXT,
   due         TEXT,
+  due_time    TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
@@ -58,6 +59,14 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `;
 
+/** 既存 DB に後から追加したカラムを補う (CREATE TABLE IF NOT EXISTS は既存テーブルに列を足さないため)。 */
+function migrate(db: Db): void {
+  const columns = db.prepare("PRAGMA table_info(objects)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "due_time")) {
+    db.exec("ALTER TABLE objects ADD COLUMN due_time TEXT");
+  }
+}
+
 /** DB を開いてスキーマを保証する。path が ":memory:" ならテスト用インメモリ。 */
 export function openDb(path: string): Db {
   if (path !== ":memory:") {
@@ -67,5 +76,6 @@ export function openDb(path: string): Db {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }

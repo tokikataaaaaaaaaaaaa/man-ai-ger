@@ -13,7 +13,7 @@ import type { LlmClient } from "../llm/types.js";
 import { recordEvent } from "../db/events.js";
 import { upsertObject } from "../db/objects.js";
 import { upsertLink } from "../db/links.js";
-import { ensureInbox } from "./actions.js";
+import { ensureInbox, formatDue } from "./actions.js";
 import {
   TRIAGE_SYSTEM_PROMPT,
   TRIAGE_OUTPUT_SCHEMA,
@@ -28,6 +28,8 @@ export interface Candidate {
   name: string;
   project: string | null;
   due: string | null;
+  /** 締切の時刻 (HH:MM)。due が無いか時刻指定が無ければ null。 */
+  dueTime: string | null;
   sourceChannel: string;
   sourceAuthor: string;
   sourceText: string;
@@ -73,6 +75,7 @@ export function listPendingCandidates(db: Db, limit = 20): Candidate[] {
       name: String(payload.name ?? ""),
       project: (payload.project as string | null) ?? null,
       due: (payload.due as string | null) ?? null,
+      dueTime: (payload.dueTime as string | null) ?? null,
       sourceChannel: String(payload.sourceChannel ?? ""),
       sourceAuthor: String(payload.sourceAuthor ?? ""),
       sourceText: String(payload.sourceText ?? ""),
@@ -122,6 +125,7 @@ export async function detectCandidate(
     name: triage.name,
     project: triage.project,
     due: triage.due,
+    dueTime: null,
     sourceChannel: msg.channel,
     sourceAuthor: msg.author,
     sourceText: msg.text.slice(0, 500),
@@ -136,6 +140,7 @@ export async function detectCandidate(
       name: candidate.name,
       project: candidate.project,
       due: candidate.due,
+      dueTime: candidate.dueTime,
       sourceChannel: candidate.sourceChannel,
       sourceAuthor: candidate.sourceAuthor,
       sourceText: candidate.sourceText,
@@ -157,6 +162,8 @@ export function reviseCandidate(
     name: patch.name ?? candidate.name,
     project: patch.project !== undefined ? patch.project : candidate.project,
     due: patch.due !== undefined ? patch.due : candidate.due,
+    // due を変更したら dueTime は組み直しが必要になるのでリセットする
+    dueTime: patch.due !== undefined ? null : candidate.dueTime,
   };
   recordEvent(
     db,
@@ -167,6 +174,7 @@ export function reviseCandidate(
       name: revised.name,
       project: revised.project,
       due: revised.due,
+      dueTime: revised.dueTime,
       sourceChannel: revised.sourceChannel,
       sourceAuthor: revised.sourceAuthor,
       sourceText: revised.sourceText,
@@ -216,6 +224,7 @@ export function approveCandidate(db: Db, candidate: Candidate, now: Date = new D
     type: "Task",
     name: candidate.name,
     due: candidate.due,
+    dueTime: candidate.dueTime,
     now,
   });
   const projectId = candidate.project
@@ -227,7 +236,7 @@ export function approveCandidate(db: Db, candidate: Candidate, now: Date = new D
       db,
       "task_created",
       `タスク「${task.object.name}」を追加 (Slack 候補から承認)`,
-      { id: task.object.id, candidateId: candidate.id, due: candidate.due },
+      { id: task.object.id, candidateId: candidate.id, due: candidate.due, dueTime: candidate.dueTime },
       now,
     );
   } else {
@@ -235,7 +244,7 @@ export function approveCandidate(db: Db, candidate: Candidate, now: Date = new D
       db,
       "task_updated",
       `既存タスク「${task.object.name}」に Slack 候補を紐づけ`,
-      { id: task.object.id, candidateId: candidate.id, due: candidate.due },
+      { id: task.object.id, candidateId: candidate.id, due: candidate.due, dueTime: candidate.dueTime },
       now,
     );
   }
@@ -246,7 +255,7 @@ export function approveCandidate(db: Db, candidate: Candidate, now: Date = new D
     { candidateId: candidate.id, taskId: task.object.id },
     now,
   );
-  const due = candidate.due ? ` (締切: ${candidate.due})` : "";
+  const due = candidate.due ? ` (締切: ${formatDue(candidate.due, candidate.dueTime)})` : "";
   return task.created
     ? `📋 タスク「${task.object.name}」を追加しました${due}`
     : `📋 既存タスク「${task.object.name}」に紐づけました${due}`;
@@ -261,4 +270,52 @@ export function rejectCandidate(db: Db, candidate: Candidate, now: Date = new Da
     { candidateId: candidate.id },
     now,
   );
+}
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface DueReply {
+  due: string | null;
+  dueTime: string | null;
+}
+
+/**
+ * 承認前の締切確認への返信をパースする (deterministic、LLM を使わない)。
+ * 「わからない/決まっていない/なし」は due なしとして確定 (無理に聞き返さない)。
+ * 読み取れない場合は null を返し、呼び出し側は聞き直す。
+ */
+export function parseDueReply(text: string, now: Date = new Date()): DueReply | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  if (/^(わからない|わかりません|未定|決まっていない|決まってない|なし|none|null)$/i.test(trimmed)) {
+    return { due: null, dueTime: null };
+  }
+
+  // "2026-07-10 17:00" / "2026-07-10T17:00" / "2026-07-10" の順で厳格に受け付ける
+  const isoWithTime = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})$/.exec(trimmed);
+  if (isoWithTime) {
+    const [, due, dueTime] = isoWithTime;
+    if (ISO_DATE.test(due!) && HHMM.test(dueTime!)) return { due: due!, dueTime: dueTime! };
+  }
+  if (ISO_DATE.test(trimmed)) return { due: trimmed, dueTime: null };
+
+  // 相対表現: 今日/明日/明後日 (+ 任意で HH:MM)
+  const relative = /^(今日|明日|明後日)(?:\s+(\d{1,2}:\d{2}))?$/.exec(trimmed);
+  if (relative) {
+    const offset = relative[1] === "今日" ? 0 : relative[1] === "明日" ? 1 : 2;
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+    const due = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const rawTime = relative[2];
+    if (rawTime) {
+      const [h, m] = rawTime.split(":");
+      const dueTime = `${h!.padStart(2, "0")}:${m}`;
+      if (!HHMM.test(dueTime)) return null;
+      return { due, dueTime };
+    }
+    return { due, dueTime: null };
+  }
+
+  return null;
 }

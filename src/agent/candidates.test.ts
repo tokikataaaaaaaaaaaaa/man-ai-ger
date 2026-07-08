@@ -6,6 +6,7 @@ import {
   detectCandidate,
   listPendingCandidates,
   parseCandidateRevisionText,
+  parseDueReply,
   rejectCandidate,
   reviseCandidate,
 } from "./candidates.js";
@@ -169,5 +170,36 @@ describe("task candidates", () => {
       name: "認証方式を比較する",
     });
     expect(parseCandidateRevisionText("Due: 今日")).toEqual({});
+  });
+});
+
+describe("parseDueReply (締切確認への返信パース)", () => {
+  const now = new Date(2026, 6, 8, 10, 0); // 2026-07-08 (水)
+
+  it("YYYY-MM-DD 形式を受け付ける", () => {
+    expect(parseDueReply("2026-07-10", now)).toEqual({ due: "2026-07-10", dueTime: null });
+  });
+
+  it("YYYY-MM-DD HH:MM / YYYY-MM-DDTHH:MM の両方を受け付ける", () => {
+    expect(parseDueReply("2026-07-10 17:00", now)).toEqual({ due: "2026-07-10", dueTime: "17:00" });
+    expect(parseDueReply("2026-07-10T09:30", now)).toEqual({ due: "2026-07-10", dueTime: "09:30" });
+  });
+
+  it("今日/明日/明後日 の相対表現を日付参照表なしで解決する", () => {
+    expect(parseDueReply("今日", now)).toEqual({ due: "2026-07-08", dueTime: null });
+    expect(parseDueReply("明日", now)).toEqual({ due: "2026-07-09", dueTime: null });
+    expect(parseDueReply("明後日 18:00", now)).toEqual({ due: "2026-07-10", dueTime: "18:00" });
+  });
+
+  it("「わからない」「決まっていない」等は due なしとして確定させる (聞き返さない)", () => {
+    expect(parseDueReply("わからない", now)).toEqual({ due: null, dueTime: null });
+    expect(parseDueReply("決まっていない", now)).toEqual({ due: null, dueTime: null });
+    expect(parseDueReply("なし", now)).toEqual({ due: null, dueTime: null });
+  });
+
+  it("読み取れない自由文は null を返し、呼び出し側が聞き直せるようにする", () => {
+    expect(parseDueReply("来週あたり", now)).toBeNull();
+    expect(parseDueReply("金曜日", now)).toBeNull();
+    expect(parseDueReply("", now)).toBeNull();
   });
 });

@@ -107,7 +107,8 @@ export function renderTasksPage(view: TasksView, services: DashboardService[]): 
 }
 
 function renderTaskRow(t: TaskPageItem): string {
-  const due = t.due ? `<span class="task-due">締切 ${escapeHtml(t.due)}</span>` : "";
+  const dueText = t.due ? (t.dueTime ? `${t.due} ${t.dueTime}` : t.due) : null;
+  const due = dueText ? `<span class="task-due">締切 ${escapeHtml(dueText)}</span>` : "";
   const deferred = t.deferredUntil
     ? `<span class="task-due">再開 ${escapeHtml(t.deferredUntil)}</span>`
     : "";

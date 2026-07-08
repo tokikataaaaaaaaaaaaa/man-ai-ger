@@ -27,6 +27,11 @@ export function ensureInbox(db: Db, now?: Date): string {
     .object.id;
 }
 
+/** 締切の表示用フォーマット (時刻指定があれば付記)。 */
+export function formatDue(due: string, dueTime: string | null): string {
+  return dueTime ? `${due} ${dueTime}` : due;
+}
+
 function applyOne(db: Db, action: LlmAction, now: Date): string | null {
   switch (action.type) {
     case "create_project": {
@@ -37,10 +42,13 @@ function applyOne(db: Db, action: LlmAction, now: Date): string | null {
     }
 
     case "create_task": {
+      // dueTime は due と一緒に指定されたときだけ意味を持つ (due が無ければ握りつぶす)
+      const dueTime = action.due ? (action.dueTime ?? null) : null;
       const r = upsertObject(db, {
         type: "Task",
         name: action.name,
         due: action.due ?? null,
+        dueTime,
         now,
       });
       // 所属プロジェクト: 指定があればそれを保証、無ければ Inbox
@@ -50,17 +58,17 @@ function applyOne(db: Db, action: LlmAction, now: Date): string | null {
       upsertLink(db, r.object.id, "belongs_to", projectId, now);
       if (!r.created) {
         // 既存タスクへの due 更新のみ通知
-        if (action.due) return `📋 タスク「${r.object.name}」の締切を ${action.due} にしました`;
+        if (action.due) return `📋 タスク「${r.object.name}」の締切を ${formatDue(action.due, dueTime)} にしました`;
         return null;
       }
       recordEvent(
         db,
         "task_created",
         `タスク「${r.object.name}」を追加`,
-        { id: r.object.id, project: action.project ?? INBOX_PROJECT, due: action.due ?? null },
+        { id: r.object.id, project: action.project ?? INBOX_PROJECT, due: action.due ?? null, dueTime },
         now,
       );
-      const due = action.due ? ` (締切: ${action.due})` : "";
+      const due = action.due ? ` (締切: ${formatDue(action.due, dueTime)})` : "";
       return `📋 タスク「${r.object.name}」を追加しました${due}`;
     }
 
