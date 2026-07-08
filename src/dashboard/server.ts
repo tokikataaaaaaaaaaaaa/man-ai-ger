@@ -6,14 +6,28 @@ import { handleCoachingIntent, parseCoachingIntent } from "../agent/coaching.js"
 import { candidateDecisionQuickReplies, type QuickReply } from "../slack/blocks.js";
 import { localDate } from "../util/dates.js";
 import type { WorkObject } from "../db/types.js";
-import { buildDashboardSnapshot, type DashboardSnapshotOptions } from "./snapshot.js";
-import { renderDashboardPage } from "./render.js";
+import {
+  buildDashboardSnapshot,
+  buildLogView,
+  buildSettingsView,
+  buildTasksView,
+  type DashboardSnapshotOptions,
+  type SettingsViewInfo,
+} from "./snapshot.js";
+import {
+  renderDashboardPage,
+  renderLogPage,
+  renderSettingsPage,
+  renderTasksPage,
+} from "./render.js";
 
 export interface DashboardServerOptions extends DashboardSnapshotOptions {
   db: Db;
   host?: string;
   port: number;
   sendToOwner?: (text: string, quickReplies?: QuickReply[]) => Promise<void>;
+  /** 設定ページに表示する環境情報 (任意)。 */
+  settingsInfo?: SettingsViewInfo;
 }
 
 export interface DashboardServerHandle {
@@ -45,6 +59,24 @@ async function handleRequest(
     if (req.method === "GET" && url.pathname === "/") {
       const snapshot = buildDashboardSnapshot(opts.db, opts);
       sendHtml(res, renderDashboardPage(snapshot));
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/tasks") {
+      const snapshot = buildDashboardSnapshot(opts.db, opts);
+      sendHtml(res, renderTasksPage(buildTasksView(opts.db), snapshot.services));
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/log") {
+      const snapshot = buildDashboardSnapshot(opts.db, opts);
+      sendHtml(res, renderLogPage(buildLogView(opts.db), snapshot.services));
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/settings") {
+      const snapshot = buildDashboardSnapshot(opts.db, opts);
+      sendHtml(
+        res,
+        renderSettingsPage(buildSettingsView(opts.db, opts.settingsInfo ?? {}), snapshot.services),
+      );
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/dashboard") {

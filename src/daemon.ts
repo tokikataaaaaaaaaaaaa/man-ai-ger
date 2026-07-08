@@ -86,6 +86,11 @@ export async function startDaemon(): Promise<void> {
       get codexAvailable() {
         return codexAvailable;
       },
+      settingsInfo: {
+        home: config.home,
+        codexModel: config.codexModel,
+        dashboardPort: config.dashboardPort,
+      },
       ...(slack
         ? { sendToOwner: (text: string, quickReplies?: Parameters<SlackRuntime["sendToOwner"]>[1]) => slack.sendToOwner(text, quickReplies) }
         : {}),

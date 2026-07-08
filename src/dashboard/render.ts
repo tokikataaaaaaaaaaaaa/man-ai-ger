@@ -6,15 +6,33 @@ import type {
   DashboardMetric,
   DashboardService,
   DashboardSnapshot,
+  LogDay,
+  SettingsRow,
+  TasksView,
+  TaskPageItem,
 } from "./snapshot.js";
 
-export function renderDashboardPage(snapshot: DashboardSnapshot): string {
+export type PageKey = "dashboard" | "tasks" | "log" | "settings";
+
+const NAV_ITEMS: { key: PageKey; href: string; icon: string; label: string }[] = [
+  { key: "dashboard", href: "/", icon: "■", label: "ダッシュボード" },
+  { key: "tasks", href: "/tasks", icon: "●", label: "タスク" },
+  { key: "log", href: "/log", icon: "◇", label: "会話ログ" },
+  { key: "settings", href: "/settings", icon: "□", label: "設定" },
+];
+
+/** 全ページ共通のシェル (サイドバー + サービス + 30 秒自動同期)。 */
+function renderShell(page: PageKey, title: string, services: DashboardService[], content: string): string {
+  const nav = NAV_ITEMS.map(
+    (item) =>
+      `<a class="nav-item${item.key === page ? " active" : ""}" href="${item.href}"><span class="nav-icon">${item.icon}</span>${item.label}</a>`,
+  ).join("");
   return `<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Man.Ai.ger Dashboard</title>
+  <title>${escapeHtml(title)}</title>
   <style>${CSS}</style>
 </head>
 <body>
@@ -27,43 +45,120 @@ export function renderDashboardPage(snapshot: DashboardSnapshot): string {
           <div class="brand-sub">Local work coach</div>
         </div>
       </div>
-      <nav class="nav">
-        <div class="nav-item active"><span class="nav-icon">■</span>ダッシュボード</div>
-        <div class="nav-item"><span class="nav-icon">●</span>タスク</div>
-        <div class="nav-item"><span class="nav-icon">◇</span>会話ログ</div>
-        <div class="nav-item"><span class="nav-icon">□</span>設定</div>
-      </nav>
+      <nav class="nav">${nav}</nav>
       <div class="status-rail">
         <div class="sidebar-label">サービス</div>
-        <div class="service-list">${snapshot.services.map(renderService).join("")}</div>
+        <div class="service-list">${services.map(renderService).join("")}</div>
       </div>
     </aside>
-    <main class="main">
-      <section class="content-grid">
-        <div class="left-stack">
-          ${renderCurrent(snapshot.current)}
-          <section class="summary-grid" aria-label="Task overview">
-            ${snapshot.metrics.map(renderMetric).join("")}
-          </section>
-        </div>
-        <aside class="right-stack" aria-label="Slack context">
-          <section class="panel" aria-labelledby="conversation">
-            <div class="panel-head">
-              <div>
-                <div id="conversation" class="panel-title">Slack Context</div>
-                <div class="panel-meta">確認専用 / 入力と承認はSlack</div>
-              </div>
-            </div>
-            <div class="conversation">${snapshot.slackContext.map(renderContextItem).join("")}</div>
-          </section>
-        </aside>
-      </section>
-    </main>
+    <main class="main">${content}</main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script>${JS}</script>
 </body>
 </html>`;
+}
+
+export function renderDashboardPage(snapshot: DashboardSnapshot): string {
+  const content = `<section class="content-grid">
+    <div class="left-stack">
+      ${renderCurrent(snapshot.current)}
+      <section class="summary-grid" aria-label="Task overview">
+        ${snapshot.metrics.map(renderMetric).join("")}
+      </section>
+    </div>
+    <aside class="right-stack" aria-label="Slack context">
+      <section class="panel" aria-labelledby="conversation">
+        <div class="panel-head">
+          <div>
+            <div id="conversation" class="panel-title">Slack Context</div>
+            <div class="panel-meta">確認専用 / 入力と承認はSlack</div>
+          </div>
+        </div>
+        <div class="conversation">${snapshot.slackContext.map(renderContextItem).join("")}</div>
+      </section>
+    </aside>
+  </section>`;
+  return renderShell("dashboard", "Man.Ai.ger Dashboard", snapshot.services, content);
+}
+
+// --- タスクページ -------------------------------------------------------------
+
+export function renderTasksPage(view: TasksView, services: DashboardService[]): string {
+  const groups =
+    view.active.length === 0
+      ? `<div class="empty-state"><h2>タスクはまだありません</h2><p>SlackでBotに仕事を話すと、ここに一覧が育ちます。</p></div>`
+      : view.active
+          .map(
+            (g) => `<section class="panel task-group">
+      <div class="panel-head"><div><div class="panel-title">${escapeHtml(g.projectName)}</div><div class="panel-meta">${g.tasks.length} 件</div></div></div>
+      <div class="task-list">${g.tasks.map(renderTaskRow).join("")}</div>
+    </section>`,
+          )
+          .join("");
+  const done =
+    view.doneRecent.length === 0
+      ? ""
+      : `<section class="panel task-group">
+      <div class="panel-head"><div><div class="panel-title">最近の完了</div><div class="panel-meta">直近 ${view.doneRecent.length} 件</div></div></div>
+      <div class="task-list">${view.doneRecent.map(renderTaskRow).join("")}</div>
+    </section>`;
+  return renderShell("tasks", "タスク — Man.Ai.ger", services, `<div class="page-stack">${groups}${done}</div>`);
+}
+
+function renderTaskRow(t: TaskPageItem): string {
+  const due = t.due ? `<span class="task-due">締切 ${escapeHtml(t.due)}</span>` : "";
+  const deferred = t.deferredUntil
+    ? `<span class="task-due">再開 ${escapeHtml(t.deferredUntil)}</span>`
+    : "";
+  return `<div class="task-row">
+    <span class="pill ${t.statusTone}">${escapeHtml(t.statusLabel)}</span>
+    <span class="task-name">${escapeHtml(t.name)}</span>
+    ${due}${deferred}
+  </div>`;
+}
+
+// --- 会話ログページ -----------------------------------------------------------
+
+export function renderLogPage(days: LogDay[], services: DashboardService[]): string {
+  const content =
+    days.length === 0
+      ? `<div class="empty-state"><h2>会話ログはまだありません</h2><p>SlackでBotと話すと、日別の全往復がここに残ります。</p></div>`
+      : days
+          .map(
+            (d) => `<section class="panel task-group">
+      <div class="panel-head"><div><div class="panel-title">${escapeHtml(d.date)}</div><div class="panel-meta">${d.turns.length} メッセージ</div></div></div>
+      <div class="conversation">${d.turns
+        .map(
+          (t) => `<div class="message">
+        <div class="message-meta"><span>${t.role === "user" ? "あなた" : "Man.Ai.ger"}</span><span>${escapeHtml(t.time)}</span></div>
+        <div class="bubble${t.role === "user" ? " user" : ""}">${escapeHtml(t.content)}</div>
+      </div>`,
+        )
+        .join("")}</div>
+    </section>`,
+          )
+          .join("");
+  return renderShell("log", "会話ログ — Man.Ai.ger", services, `<div class="page-stack">${content}</div>`);
+}
+
+// --- 設定ページ ---------------------------------------------------------------
+
+export function renderSettingsPage(rows: SettingsRow[], services: DashboardService[]): string {
+  const list = rows
+    .map(
+      (r) => `<div class="settings-row">
+    <div class="settings-label">${escapeHtml(r.label)}</div>
+    <div class="settings-value">${escapeHtml(r.value)}</div>
+    ${r.hint ? `<div class="settings-hint">${escapeHtml(r.hint)}</div>` : ""}
+  </div>`,
+    )
+    .join("");
+  const content = `<div class="page-stack"><section class="panel task-group">
+    <div class="panel-head"><div><div class="panel-title">設定</div><div class="panel-meta">変更はターミナル (manaiger config) か .env で行います</div></div></div>
+    <div class="settings-list">${list}</div>
+  </section></div>`;
+  return renderShell("settings", "設定 — Man.Ai.ger", services, content);
 }
 
 function renderCurrent(current: DashboardCurrent | null): string {
@@ -194,6 +289,7 @@ body {
   color: var(--ink);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
   letter-spacing: 0;
+  overflow-x: hidden;
 }
 button { font: inherit; }
 .app { min-height: 100vh; display: grid; grid-template-columns: 232px minmax(0, 1fr); }
@@ -203,7 +299,8 @@ button { font: inherit; }
 .brand-title { font-size: 15px; font-weight: 750; line-height: 1.2; }
 .brand-sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .nav { display: grid; gap: 4px; margin-bottom: 18px; }
-.nav-item { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: 7px; color: #3a433e; font-size: 13px; }
+.nav-item { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: 7px; color: #3a433e; font-size: 13px; text-decoration: none; }
+.nav-item:hover { background: #f0f3ee; }
 .nav-item.active { background: var(--green-soft); color: #1f5d49; font-weight: 700; }
 .nav-icon { width: 18px; height: 18px; display: grid; place-items: center; color: inherit; font-size: 13px; flex: none; }
 .status-rail { border-top: 1px solid var(--line); padding: 14px 4px 0; margin-top: 12px; display: grid; gap: 10px; }
@@ -216,14 +313,14 @@ button { font: inherit; }
 .dot.warn { background: var(--amber); }
 .dot.off { background: var(--red); }
 .main { min-width: 0; padding: 18px 22px 28px; }
-.content-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, .9fr); gap: 16px; align-items: start; }
-.left-stack, .right-stack { display: grid; gap: 16px; }
+.content-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, .9fr); gap: 16px; align-items: start; min-width: 0; }
+.left-stack, .right-stack { display: grid; gap: 16px; min-width: 0; }
 .panel, .metric { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
 .panel-head { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .panel-head > div { min-width: 0; }
 .panel-title { font-size: 14px; font-weight: 760; }
 .panel-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.management-grid { padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 14px; }
+.management-grid { padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 14px; min-width: 0; }
 .focus { display: grid; gap: 12px; min-width: 0; }
 .focus-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .focus-top > div { min-width: 0; }
@@ -267,6 +364,18 @@ button { font: inherit; }
 .action-button.danger { background: var(--red-soft); border-color: #efcec9; color: #9a342f; }
 .action-button.neutral { background: #fff; border-color: var(--line); color: #3a433e; }
 .action-button:disabled { cursor: not-allowed; opacity: .72; }
+.page-stack { display: grid; gap: 16px; max-width: 860px; }
+.task-list, .settings-list { padding: 6px 14px 14px; display: grid; }
+.task-row { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--surface-soft); flex-wrap: wrap; padding: 6px 0; }
+.task-row:last-child { border-bottom: 0; }
+.task-name { font-size: 13.5px; overflow-wrap: anywhere; min-width: 0; flex: 1; }
+.task-due { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.settings-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 2px 14px; padding: 12px 0; border-bottom: 1px solid var(--surface-soft); align-items: baseline; }
+.settings-row:last-child { border-bottom: 0; }
+.settings-label { color: var(--muted); font-size: 12.5px; font-weight: 700; }
+.settings-value { font-size: 13.5px; overflow-wrap: anywhere; }
+.settings-hint { grid-column: 2; color: var(--muted); font-size: 12px; }
+@media (max-width: 560px) { .settings-row { grid-template-columns: 1fr; } .settings-hint { grid-column: 1; } }
 .toast { position: fixed; right: 18px; bottom: 18px; max-width: min(420px, calc(100vw - 36px)); background: #1f2522; color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.45; box-shadow: 0 8px 28px rgba(31, 37, 34, .18); opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .16s ease, transform .16s ease; }
 .toast.show { opacity: 1; transform: translateY(0); }
 @media (max-width: 1180px) { .content-grid { grid-template-columns: 1fr; } }
@@ -282,6 +391,9 @@ button { font: inherit; }
   .main { padding: 14px 12px 22px; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .consult-grid { grid-template-columns: 1fr; }
+  .focus-top { display: grid; gap: 8px; }
+  .focus-top > .pill { justify-self: start; }
+  .focus h2, .empty-state h2 { font-size: 18px; }
   .action-button { white-space: normal; text-align: center; }
 }
 `;

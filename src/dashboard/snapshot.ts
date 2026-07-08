@@ -11,6 +11,7 @@ import type { TaskStatus, WorkEvent, WorkObject } from "../db/types.js";
 import { listPendingCandidates, type Candidate } from "../agent/candidates.js";
 import { plannedChecksForTask } from "../flows/scheduler.js";
 import { hhmmToMinutes, localDate, localTime } from "../util/dates.js";
+import { recentTurnDates, turnsOnDate } from "../db/turns.js";
 
 export interface DashboardAction {
   label: string;
@@ -363,4 +364,146 @@ function isDaemonFresh(db: Db, now: Date): boolean {
 
 function timeFromIso(iso: string): string {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) ? iso.slice(11, 16) : "--:--";
+}
+
+// --- サブページ用 read model (タスク / 会話ログ / 設定) ------------------------
+
+export interface TaskPageItem {
+  name: string;
+  statusLabel: string;
+  /** pill の色クラス (render 側でそのまま使う)。 */
+  statusTone: "todo" | "doing" | "blocked" | "done" | "approval";
+  due: string | null;
+  deferredUntil: string | null;
+}
+
+export interface TaskPageGroup {
+  projectName: string;
+  tasks: TaskPageItem[];
+}
+
+export interface TasksView {
+  active: TaskPageGroup[];
+  doneRecent: TaskPageItem[];
+}
+
+const STATUS_TONE: Record<TaskStatus, TaskPageItem["statusTone"]> = {
+  todo: "todo",
+  doing: "doing",
+  blocked: "blocked",
+  done: "done",
+  deferred: "approval", // 延期中はアンバー系で目立たせる
+};
+
+function toTaskPageItem(t: WorkObject): TaskPageItem {
+  const status = t.status ?? "todo";
+  const props = t.properties as { deferred_until?: string };
+  return {
+    name: t.name,
+    statusLabel: STATUS_LABEL[status],
+    statusTone: STATUS_TONE[status],
+    due: t.due,
+    deferredUntil: typeof props.deferred_until === "string" ? props.deferred_until : null,
+  };
+}
+
+/** タスクページ: プロジェクト別の全タスク (アクティブ) + 直近の完了。 */
+export function buildTasksView(db: Db): TasksView {
+  const projects = listByType(db, "Project");
+  const projectById = new Map(projects.map((p) => [p.id, p]));
+  const tasks = listByType(db, "Task");
+
+  const groups = new Map<string, TaskPageItem[]>();
+  const doneRecent: TaskPageItem[] = [];
+  for (const t of tasks) {
+    if (t.status === "done") {
+      doneRecent.push(toTaskPageItem(t));
+      continue;
+    }
+    const projectName = projectById.get(taskProjectId(db, t.id) ?? "")?.name ?? "Inbox";
+    const list = groups.get(projectName) ?? [];
+    list.push(toTaskPageItem(t));
+    groups.set(projectName, list);
+  }
+  const active: TaskPageGroup[] = [...groups.entries()]
+    .map(([projectName, list]) => ({
+      projectName,
+      tasks: list.sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
+    }))
+    .sort((a, b) => a.projectName.localeCompare(b.projectName, "ja"));
+  return { active, doneRecent: doneRecent.slice(-20).reverse() };
+}
+
+export interface LogDay {
+  date: string;
+  turns: { role: "user" | "assistant"; content: string; time: string }[];
+}
+
+/** 会話ログページ: 会話がある直近日を新しい順に。 */
+export function buildLogView(db: Db, days = 7): LogDay[] {
+  return recentTurnDates(db, days).map((date) => ({
+    date,
+    turns: turnsOnDate(db, date).map((t) => ({
+      role: t.role,
+      content: t.content,
+      time: timeFromIso(t.at),
+    })),
+  }));
+}
+
+export interface SettingsRow {
+  label: string;
+  value: string;
+  hint?: string;
+}
+
+export interface SettingsViewInfo {
+  home?: string;
+  codexModel?: string | null;
+  dashboardPort?: number;
+}
+
+/** 設定ページ: 現在の設定値と変更方法 (表示専用。変更は CLI / Slack)。 */
+export function buildSettingsView(db: Db, info: SettingsViewInfo = {}): SettingsRow[] {
+  const owner = getSetting(db, "owner_slack_id");
+  const rows: SettingsRow[] = [
+    {
+      label: "working hours",
+      value: `${getWorkStart(db)} - ${getWorkEnd(db)}`,
+      hint: "manaiger config --work-start 09:30 --work-end 18:30",
+    },
+    {
+      label: "通知の最小間隔",
+      value: `${getSetting(db, "interaction_spacing_min") ?? "20"} 分`,
+      hint: "連続で確認を送らないためのガード",
+    },
+    {
+      label: "未応答の再確認まで",
+      value: `${getSetting(db, "recheck_after_min") ?? "30"} 分`,
+      hint: "再確認は 1 回だけ送られます",
+    },
+    {
+      label: "オーナー (Slack)",
+      value: owner ?? "未登録",
+      ...(owner ? {} : { hint: "Bot に DM を送った最初の人が登録されます" }),
+    },
+  ];
+  if (info.codexModel !== undefined) {
+    rows.push({
+      label: "Codex モデル",
+      value: info.codexModel ?? "Codex 側の既定",
+      hint: "MANAIGER_CODEX_MODEL で変更",
+    });
+  }
+  if (info.home) {
+    rows.push({ label: "データの保存先", value: info.home, hint: "このマシンの外には出ません" });
+  }
+  if (info.dashboardPort) {
+    rows.push({
+      label: "Dashboard ポート",
+      value: String(info.dashboardPort),
+      hint: "MANAIGER_DASHBOARD_PORT で変更",
+    });
+  }
+  return rows;
 }

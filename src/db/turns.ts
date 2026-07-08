@@ -50,3 +50,13 @@ export function turnsOnDate(db: Db, date: string, limit?: number): Turn[] {
   if (limit !== undefined && all.length > limit) return all.slice(all.length - limit);
   return all;
 }
+
+/** 会話がある日付を新しい順で返す (会話ログページ用)。 */
+export function recentTurnDates(db: Db, limit = 14): string[] {
+  return db
+    .prepare<[number], { date: string }>(
+      "SELECT DISTINCT date FROM turns ORDER BY date DESC LIMIT ?",
+    )
+    .all(limit)
+    .map((r) => r.date);
+}
