@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * manaiger CLI (architecture.md §9)。
+ *   init   : 初回起動に必要な設定を作成
  *   start  : daemon をフォアグラウンド起動
  *   status : プロジェクト/タスクの現在地
  *   doctor : セットアップ状態の検査
@@ -9,6 +10,7 @@
  */
 import { Command } from "commander";
 import { existsSync } from "node:fs";
+import { createInterface, type Interface } from "node:readline/promises";
 import { openDb } from "./db/client.js";
 import { listByType, listActiveTasks } from "./db/objects.js";
 import { taskProjectId } from "./db/links.js";
@@ -30,6 +32,16 @@ import { createLogger } from "./log.js";
 import { startDashboardServer } from "./dashboard/server.js";
 import { createSlackApp } from "./slack/app.js";
 import type { TaskStatus } from "./db/types.js";
+import {
+  applyInitConfig,
+  DEFAULT_CODEX_PATH,
+  DEFAULT_DASHBOARD_PORT,
+  defaultInitHome,
+  maskSecret,
+  readInitRuntimeDefaults,
+  validateInitConfig,
+  type InitConfig,
+} from "./onboarding/init.js";
 
 const STATUS_ICON: Record<TaskStatus, string> = {
   todo: "◻︎",
@@ -48,6 +60,13 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const program = new Command();
 program.name("manaiger").description("Man.Ai.ger — 共感コーチ型マネジメント AI");
+
+program
+  .command("init")
+  .description("初回起動に必要な設定を作成する")
+  .action(async () => {
+    await runInitCommand();
+  });
 
 program
   .command("start")
@@ -289,6 +308,109 @@ program
       );
     },
   );
+
+async function runInitCommand(): Promise<void> {
+  const current = loadConfig();
+  const runtimeDefaults = readInitRuntimeDefaults(current.dbPath);
+  console.log("");
+  console.log("Man.Ai.ger の初期設定を始めます。");
+  console.log("設定はこのマシンのローカルファイルと SQLite に保存されます。");
+  console.log("MVP の連携対象は Slack のみです。");
+  console.log("");
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const home = await ask(rl, "データ保存先", current.home || defaultInitHome());
+    const slackBotToken = await ask(
+      rl,
+      "Slack Bot Token (xoxb-...)",
+      current.slackBotToken ?? "",
+      current.slackBotToken ? maskSecret(current.slackBotToken) : "",
+    );
+    const slackAppToken = await ask(
+      rl,
+      "Slack App Token (xapp-...)",
+      current.slackAppToken ?? "",
+      current.slackAppToken ? maskSecret(current.slackAppToken) : "",
+    );
+    const workStart = await ask(rl, "1日の作業開始時刻", runtimeDefaults.workStart);
+    const workEnd = await ask(rl, "1日の作業終了時刻", runtimeDefaults.workEnd);
+    const interactionSpacingMin = Number(
+      await ask(
+        rl,
+        "連続して確認を送らない最小間隔 (分)",
+        String(runtimeDefaults.interactionSpacingMin),
+      ),
+    );
+    const recheckAfterMin = Number(
+      await ask(
+        rl,
+        "未応答のとき何分後に1回だけ再確認するか",
+        String(runtimeDefaults.recheckAfterMin),
+      ),
+    );
+    const dashboardPort = Number(
+      await ask(rl, "Dashboard のポート", String(current.dashboardPort || DEFAULT_DASHBOARD_PORT)),
+    );
+    const codexPath = await ask(rl, "Codex CLI のパス", current.codexPath || DEFAULT_CODEX_PATH);
+    const codexModelText = await ask(
+      rl,
+      "Codex model (空欄なら Codex 側の既定)",
+      current.codexModel ?? "",
+      current.codexModel ?? "",
+    );
+
+    const config: InitConfig = {
+      home,
+      slackBotToken,
+      slackAppToken,
+      workStart,
+      workEnd,
+      interactionSpacingMin,
+      recheckAfterMin,
+      dashboardPort,
+      codexPath,
+      codexModel: codexModelText.trim() ? codexModelText.trim() : null,
+    };
+    const validation = validateInitConfig(config);
+    if (!validation.ok) {
+      console.error("");
+      console.error("入力に問題があります。保存せずに終了します。");
+      for (const e of validation.errors) console.error(`- ${e}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const result = applyInitConfig(config);
+    console.log("");
+    console.log("初期設定が完了しました。");
+    console.log(`設定ファイル: ${result.envPath}`);
+    console.log(`データ保存先: ${result.home}`);
+    console.log(`DB: ${result.dbPath}`);
+    console.log(`Slack Bot Token: ${result.maskedSlackBotToken}`);
+    console.log(`Slack App Token: ${result.maskedSlackAppToken}`);
+    console.log("");
+    console.log("次に実行してください:");
+    console.log("  manaiger doctor");
+    console.log("  manaiger start");
+    console.log("");
+    console.log(`Dashboard: ${result.dashboardUrl}`);
+    console.log("Slack で Man.Ai.ger に DM を送ると、あなたがオーナーとして登録されます。");
+  } finally {
+    rl.close();
+  }
+}
+
+async function ask(
+  rl: Interface,
+  label: string,
+  defaultValue: string,
+  displayDefault = defaultValue,
+): Promise<string> {
+  const suffix = displayDefault ? ` [${displayDefault}]` : "";
+  const answer = (await rl.question(`${label}${suffix}: `)).trim();
+  return answer || defaultValue;
+}
 
 function parseMinutesOption(raw: string): number | null {
   const n = Number(raw);

@@ -18,22 +18,30 @@ export interface Config {
   dashboardPort: number;
 }
 
-/** カレント → home の順に .env を読み、既存の env を上書きしない。 */
+/** カレント → bootstrap home → resolved home の順に .env を読み、既存の env を上書きしない。 */
 export function loadDotEnv(cwd: string = process.cwd()): void {
-  for (const p of [join(cwd, ".env"), join(resolveHome(), ".env")]) {
-    if (!existsSync(p)) continue;
-    try {
-      const lines = readFileSync(p, "utf8").split("\n");
-      for (const line of lines) {
-        const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-        if (!m) continue;
-        const key = m[1]!;
-        const value = parseDotEnvValue(m[2]!);
-        if (process.env[key] === undefined) process.env[key] = value;
-      }
-    } catch {
-      /* .env が読めなくても起動は続ける */
+  const bootstrapHome = defaultHome();
+  const paths = [join(cwd, ".env"), join(bootstrapHome, ".env")];
+  for (const p of uniquePaths(paths)) {
+    loadDotEnvFile(p);
+  }
+  const resolvedHome = resolveHome();
+  if (resolvedHome !== bootstrapHome) loadDotEnvFile(join(resolvedHome, ".env"));
+}
+
+function loadDotEnvFile(p: string): void {
+  if (!existsSync(p)) return;
+  try {
+    const lines = readFileSync(p, "utf8").split("\n");
+    for (const line of lines) {
+      const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+      if (!m) continue;
+      const key = m[1]!;
+      const value = parseDotEnvValue(m[2]!);
+      if (process.env[key] === undefined) process.env[key] = value;
     }
+  } catch {
+    /* .env が読めなくても起動は続ける */
   }
 }
 
@@ -53,8 +61,20 @@ function parseDotEnvValue(raw: string): string {
 
 function resolveHome(): string {
   const h = process.env.MANAIGER_HOME;
-  if (h && h.trim()) return h.replace(/^~(?=$|\/)/, homedir());
-  return join(homedir(), ".manaiger");
+  if (h && h.trim()) return h.replace(/^~(?=$|\/)/, osHome());
+  return defaultHome();
+}
+
+function defaultHome(): string {
+  return join(osHome(), ".manaiger");
+}
+
+function osHome(): string {
+  return process.env.HOME || homedir();
+}
+
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths)];
 }
 
 export function loadConfig(): Config {

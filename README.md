@@ -33,13 +33,16 @@ Slack の mention / DM からタスク候補を拾い、ユーザーに Slack DM
 ```bash
 nvm use
 pnpm install
-cp .env.example .env    # 2 つのトークンを記入
+pnpm cli init            # 保存先、Slack token、作業時間を対話的に設定
 pnpm cli doctor          # ✅ が並ぶことを確認
 pnpm dev                 # daemon をフォアグラウンド起動
 ```
 
 Slack で **Man.Ai.ger に DM を送ってください** (アプリの「メッセージ」タブ)。
 最初に DM した人がオーナーとして登録され、以後はタスクの開始・途中・終了に合わせて Bot から声がかかります。
+
+`manaiger init` は `~/.manaiger/.env` を作成し、Slack token などの起動前設定を保存します。
+working hours / interaction spacing / recheck interval は SQLite settings に保存されます。
 
 ### 3. 常駐させる (任意)
 
@@ -61,6 +64,7 @@ bash scripts/setup-launchd.sh   # macOS launchd に登録 (ログイン時に自
 ```bash
 pnpm cli status                     # ターミナルから現在地を見る
 pnpm cli config                     # interaction 設定を見る
+pnpm cli init                       # 初期設定を作成・更新する
 ```
 
 ## 会社 PC への展開
