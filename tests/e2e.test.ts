@@ -171,6 +171,36 @@ describe("シナリオ: mention → タスク候補 → 承認 → Dashboard 反
     expect(sentToOwner).toHaveLength(1);
     expect(sentToOwner[0]!.text.length).toBeGreaterThan(0);
   });
+
+  it("Dashboard の「勤務開始」ボタンは、Slack mention なしでも今日/将来のタスクを聞き出し登録する", async () => {
+    const sentToOwner: { text: string }[] = [];
+    const llm = new FakeLlm([
+      reply("2件、記録しました。", [
+        { type: "create_task", name: "見積書のレビュー", project: null, due: localDate(at("12:00")) },
+        { type: "create_task", name: "来月の企画書たたき台", project: null, due: null },
+      ]),
+    ]);
+    const result = await handleDashboardIntent(
+      {
+        db,
+        llm,
+        sendToOwner: async (text) => {
+          sentToOwner.push({ text });
+        },
+      },
+      "flow:start_of_day",
+    );
+    expect(result.message).toContain("Slack");
+    expect(sentToOwner).toHaveLength(1);
+    expect(getByName(db, "見積書のレビュー", "Task")).not.toBeNull();
+    expect(getByName(db, "来月の企画書たたき台", "Task")).not.toBeNull();
+  });
+
+  it("llm 未設定で「勤務開始」を押すと 409 を投げる (silent failしない)", async () => {
+    await expect(
+      handleDashboardIntent({ db, sendToOwner: async () => undefined }, "flow:start_of_day"),
+    ).rejects.toThrow(/Codex/);
+  });
 });
 
 describe("シナリオ: Slack UI (ボタン) が常に制約内", () => {

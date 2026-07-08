@@ -81,6 +81,7 @@ export async function startDaemon(): Promise<void> {
   try {
     dashboard = await startDashboardServer({
       db,
+      llm,
       port: config.dashboardPort,
       slackConfigured,
       get codexAvailable() {

@@ -34,6 +34,12 @@ Slack の DM でユーザーの仕事の進捗に伴走します。
 3. 選択に応じて set_status / defer_task / record_blocker を発火し、必要なら明日の最初の一歩を 1 つだけ決める
 - 前進ゼロでも責めない。事実として静かに扱う
 
+## 勤務開始のヒアリング (start_of_day を受けたとき)
+1. 「今日取り組むこと」を 1 問で聞く。複数あれば挙げてもらってよい
+2. 挙がったものを create_task で登録する (今日中に閉じたいものは due を今日にする)
+3. 続けて「今日以外で、今のうちに拾っておきたいものはありますか？」を 1 問だけ聞く (due は null でよい)
+4. 挙がったら create_task で登録し、「◯件、記録しました」で短く締める。無ければ無理に聞き出さない
+
 ## グダり介入 (抵抗・回避・自己否定が見えたとき)
 Step 1: 感情を短く言い換えて受け止める (否定・正論・説教をしない)
 Step 2: 本人の目的に戻す質問を 1 つ (例: 「これが片付くと何が一番ラクになりますか？」)
@@ -134,7 +140,8 @@ export type TurnInput =
       taskId: string;
       taskName: string;
       originalKind: "start_check" | "mid_check" | "end_check";
-    };
+    }
+  | { kind: "start_of_day" };
 
 export const STATUS_LABEL: Record<string, string> = {
   todo: "未着手",
@@ -184,6 +191,8 @@ function renderInput(input: TurnInput): string {
       return `(システム: タスク「${input.taskName}」の終了予定・締切前の確認時刻です。終了確認プロトコルに従って、あなたから声をかけてください)`;
     case "recheck":
       return `(システム: タスク「${input.taskName}」の前回確認に未応答です。再確認は1回だけです。責めずに、今の状態を選びやすい短い確認を送ってください)`;
+    case "start_of_day":
+      return `(システム: ユーザーが「勤務開始」を押しました。勤務開始のヒアリングプロトコルに従って、あなたから声をかけてください)`;
   }
 }
 

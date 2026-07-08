@@ -161,6 +161,12 @@ export function renderSettingsPage(rows: SettingsRow[], services: DashboardServi
   return renderShell("settings", "設定 — Man.Ai.ger", services, content);
 }
 
+function renderFlowButtons(): string {
+  return `<div class="action-strip">
+    <button type="button" class="action-button primary" data-action="flow:start_of_day">勤務開始</button>
+  </div>`;
+}
+
 function renderCurrent(current: DashboardCurrent | null): string {
   if (!current) {
     return `<section class="panel" aria-labelledby="active-management">
@@ -168,6 +174,7 @@ function renderCurrent(current: DashboardCurrent | null): string {
       <div class="empty-state">
         <h2>管理中のタスクはありません</h2>
         <p>SlackでBotに仕事を話すか、mentionからタスク候補が作られるとここに表示されます。</p>
+        ${renderFlowButtons()}
         ${renderCoachButtons()}
       </div>
     </section>`;
@@ -177,6 +184,7 @@ function renderCurrent(current: DashboardCurrent | null): string {
       <div><div id="active-management" class="panel-title">現在マネジメント中</div></div>
       <span class="pill ${pillClass(current.status)}">${escapeHtml(current.statusLabel)}</span>
     </div>
+    ${renderFlowButtons()}
     <div class="management-grid">
       <div class="focus">
         <div class="focus-top">
