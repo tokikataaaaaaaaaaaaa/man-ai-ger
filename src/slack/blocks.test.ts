@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   textBlocks,
   candidateDecisionQuickReplies,
+  coachingQuickReplies,
   quickReplyBlock,
   parseCandidateCommand,
+  parseCoachingCommand,
   taskChoiceQuickReplies,
   recapQuickReplies,
   followUpQuickReplies,
@@ -110,6 +112,27 @@ describe("quickReply", () => {
       candidateId: "candidate-1",
     });
     expect(parseCandidateCommand("タスク化する")).toBeNull();
+  });
+
+  it("AIへの相談: 表示ラベルは dashboard と同じ日本語にする", () => {
+    const replies = coachingQuickReplies();
+    expect(replies.map((r) => r.label)).toEqual([
+      "やりたくない",
+      "めんどくさい",
+      "タスク分解して",
+      "ブロッカーまとめて",
+      "今やらなくていい",
+    ]);
+    expect(replies.map((r) => r.label).join(" ")).not.toMatch(/manaiger:coach|intent/);
+    expect(validateBlocks([quickReplyBlock(replies)!])).toEqual([]);
+  });
+
+  it("AIへの相談: button value と日本語入力を coaching command として parse できる", () => {
+    const replies = coachingQuickReplies();
+    expect(parseCoachingCommand(replies[0]!.value!)).toBe("reluctant");
+    expect(parseCoachingCommand("めんどくさい")).toBe("annoying");
+    expect(parseCoachingCommand("今やらなくていい")).toBe("defer");
+    expect(parseCoachingCommand("延期として記録")).toBeNull();
   });
 });
 

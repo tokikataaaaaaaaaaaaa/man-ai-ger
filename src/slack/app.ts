@@ -11,6 +11,7 @@ import type { Db } from "../db/client.js";
 import type { LlmClient } from "../llm/types.js";
 import type { Logger } from "../log.js";
 import { buildContext, processTurn } from "../agent/run-turn.js";
+import { handleCoachingIntent } from "../agent/coaching.js";
 import { listActiveTasks } from "../db/objects.js";
 import { deleteSetting, getOwnerSlackId, getSetting, setOwnerSlackId, setSetting } from "../db/settings.js";
 import {
@@ -27,6 +28,7 @@ import {
   textBlocks,
   quickReplyBlock,
   parseCandidateCommand,
+  parseCoachingCommand,
   pressedBlocks,
   followUpQuickReplies,
   validateBlocks,
@@ -119,6 +121,13 @@ export function createSlackApp(deps: SlackAppDeps): SlackRuntime {
         }
 
         if (await handlePendingCandidateRevision(channel, text)) return;
+
+        const coachingIntent = parseCoachingCommand(text);
+        if (coachingIntent) {
+          const result = handleCoachingIntent(db, coachingIntent);
+          await post(channel, result.reply, result.quickReplies);
+          return;
+        }
 
         await processTurn({ db, llm }, { kind: "user", text }, async (reply) => {
           const replies = followUpQuickReplies(reply, listActiveTasks(db).map((t) => t.name));

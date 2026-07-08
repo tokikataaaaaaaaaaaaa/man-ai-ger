@@ -171,6 +171,8 @@ Due: 今日18:00
 
 Dashboard の `AIへの相談` は、この Slack Bot フローを開始する導線である。
 
+相談入口は LLM 不通時でも沈黙しないよう、Bot が deterministic に受け止め文と次の選択肢を返す。相談の発生は `coaching_intent` event として保存する。
+
 介入の原則:
 
 - 説教しない

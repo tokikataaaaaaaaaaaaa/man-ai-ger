@@ -5,6 +5,7 @@
  * 設計: ボタン = 定型ユーザー入力 (押下 = その value をユーザー発話として扱う)。
  * 選択アーキテクチャ (behavior-design §4): 質問には常に低摩擦の定型回答を添える。
  */
+import { COACHING_OPTIONS, parseCoachingIntent, type CoachingIntent } from "../agent/coaching.js";
 
 export interface SlackBlock {
   type: string;
@@ -105,6 +106,15 @@ export function parseCandidateCommand(value: string): CandidateCommand | null {
   const m = /^manaiger:candidate:(approve|revise|reject):(.+)$/.exec(value);
   if (!m) return null;
   return { decision: m[1] as CandidateDecision, candidateId: m[2]! };
+}
+
+/** Dashboard / Slack DM で使う AI 相談ボタン。 */
+export function coachingQuickReplies(): QuickReply[] {
+  return COACHING_OPTIONS.map((o) => ({ label: o.label, value: o.value }));
+}
+
+export function parseCoachingCommand(value: string): CoachingIntent | null {
+  return parseCoachingIntent(value);
 }
 
 /**

@@ -64,6 +64,7 @@ Task status:
 - `task_candidate_detected`
 - `task_candidate_approved`
 - `task_candidate_rejected`
+- `coaching_intent`
 - `task_created`
 - `task_status`
 - `task_updated`
@@ -146,6 +147,14 @@ mention / DM 受信
 - NG: `Slack option: 追加`
 - NG: `task_candidate`
 - NG: `approval_required`
+
+### 4.2 Slack 相談 intent
+
+`やりたくない` / `めんどくさい` / `タスク分解して` / `ブロッカーまとめて` / `今やらなくていい` は exact text または button value で deterministic に受け付ける。
+
+- 入口では LLM 不通でも短い受け止めと次の選択肢を返す
+- 相談発生は `coaching_intent` event として記録する
+- 後続の自由入力・選択肢は通常の Agent pipeline に流し、Task 更新は既存 action 契約で確定する
 
 ## 5. Scheduler
 

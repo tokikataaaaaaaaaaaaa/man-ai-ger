@@ -49,6 +49,8 @@ export type EventKind =
   | "task_candidate_detected"
   | "task_candidate_approved"
   | "task_candidate_rejected"
+  // --- 働きたくない時の相談 flow (requirements.md §6) ---
+  | "coaching_intent"
   // --- タスク単位の interaction (architecture.md §5) ---
   | "checkpoint_sent";
 
