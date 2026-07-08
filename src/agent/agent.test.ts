@@ -159,6 +159,41 @@ describe("processTurn (scheduled checks)", () => {
   });
 });
 
+describe("processTurn (start_of_day)", () => {
+  it("Slack mention が無くても発火でき、聞き出した内容から create_task が記録される。checkpoint_sent は残らない", async () => {
+    const llm = new FakeLlm([ok("今日取り組むことを教えてください。", [])]);
+    const { sent, send } = collectSend();
+    await processTurn({ db, llm }, { kind: "start_of_day" }, send);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("今日取り組むこと");
+    // タスク非依存の flow なので checkpoint_sent (taskId 前提) は記録しない
+    expect(eventsOnDate(db, localDate()).some((e) => e.kind === "checkpoint_sent")).toBe(false);
+  });
+
+  it("LLM 不通でも決定論フォールバックで応答する", async () => {
+    const llm = new FakeLlm([new Error("down")]);
+    const { sent, send } = collectSend();
+    await processTurn({ db, llm }, { kind: "start_of_day" }, send);
+    expect(sent[0]).toContain("今日取り組むこと");
+  });
+
+  it("聞き出した今日/将来のタスクが create_task で登録される", async () => {
+    const llm = new FakeLlm([
+      ok("2件、記録しました。", [
+        { type: "create_task", name: "見積書のレビュー", project: null, due: localDate() },
+        { type: "create_task", name: "来月の企画書たたき台", project: null, due: null },
+      ]),
+    ]);
+    const { sent, send } = collectSend();
+    await processTurn({ db, llm }, { kind: "start_of_day" }, send);
+
+    expect(sent[0]).toContain("記録しました");
+    expect(getByName(db, "見積書のレビュー", "Task")).not.toBeNull();
+    expect(getByName(db, "来月の企画書たたき台", "Task")).not.toBeNull();
+  });
+});
+
 describe("buildContext", () => {
   it("プロジェクト配下にタスクが並び、初日は空表示", () => {
     const empty = buildContext(db, new Date());
