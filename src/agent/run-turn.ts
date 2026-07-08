@@ -99,7 +99,21 @@ export function fallbackCheck(input: TurnInput): string {
       return `「${input.taskName}」の締め時間です。\n今日はどう閉じますか？ 完了 / 続ける / 延期する / ブロッカーあり`;
     case "recheck":
       return `「${input.taskName}」について、もう一度だけ確認します。\nいまの状態に近いものを選んでください。進んだ / 詰まった / 後でやる`;
+    case "add_task":
+      return "まだ登録されていない仕事で、抱えているものはありますか？";
   }
+}
+
+/** checkpoint_sent の記録対象は特定タスクに紐づく check のみ。 */
+function isTaskCheckpoint(
+  input: TurnInput,
+): input is Extract<TurnInput, { taskId: string; taskName: string }> {
+  return (
+    input.kind === "start_check" ||
+    input.kind === "mid_check" ||
+    input.kind === "end_check" ||
+    input.kind === "recheck"
+  );
 }
 
 // --- 本体 --------------------------------------------------------------------
@@ -153,7 +167,7 @@ export async function processTurn(
   await send(text); // 失敗したらここで throw → 以降の記録はしない
 
   appendTurn(db, "assistant", text, now);
-  if (input.kind !== "user") {
+  if (isTaskCheckpoint(input)) {
     const checkpointKind = input.kind;
     const label =
       input.kind === "start_check"

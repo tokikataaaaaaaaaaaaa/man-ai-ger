@@ -171,6 +171,28 @@ describe("シナリオ: mention → タスク候補 → 承認 → Dashboard 反
     expect(sentToOwner).toHaveLength(1);
     expect(sentToOwner[0]!.text.length).toBeGreaterThan(0);
   });
+
+  it("Dashboard の「タスク追加」ボタンは、まだ登録されていない仕事を聞き出し登録する", async () => {
+    const sentToOwner: { text: string }[] = [];
+    const llm = new FakeLlm([
+      reply("1件、記録しました。", [
+        { type: "create_task", name: "社内wikiの更新", project: null, due: null },
+      ]),
+    ]);
+    const result = await handleDashboardIntent(
+      { db, llm, sendToOwner: async (text) => void sentToOwner.push({ text }) },
+      "flow:add_task",
+    );
+    expect(result.message).toContain("Slack");
+    expect(sentToOwner).toHaveLength(1);
+    expect(getByName(db, "社内wikiの更新", "Task")).not.toBeNull();
+  });
+
+  it("llm 未設定で「タスク追加」を押すと 409 を投げる (silent failしない)", async () => {
+    await expect(
+      handleDashboardIntent({ db, sendToOwner: async () => undefined }, "flow:add_task"),
+    ).rejects.toThrow(/Codex/);
+  });
 });
 
 describe("シナリオ: Slack UI (ボタン) が常に制約内", () => {

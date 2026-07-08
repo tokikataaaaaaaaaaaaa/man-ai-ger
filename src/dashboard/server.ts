@@ -1,9 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Db } from "../db/client.js";
+import type { LlmClient } from "../llm/types.js";
 import { listByType } from "../db/objects.js";
 import { listPendingCandidates, type Candidate } from "../agent/candidates.js";
 import { handleCoachingIntent, parseCoachingIntent } from "../agent/coaching.js";
-import { candidateDecisionQuickReplies, type QuickReply } from "../slack/blocks.js";
+import { processTurn } from "../agent/run-turn.js";
+import { followUpQuickReplies, candidateDecisionQuickReplies, type QuickReply } from "../slack/blocks.js";
 import { localDate } from "../util/dates.js";
 import type { WorkObject } from "../db/types.js";
 import {
@@ -26,6 +28,8 @@ export interface DashboardServerOptions extends DashboardSnapshotOptions {
   host?: string;
   port: number;
   sendToOwner?: (text: string, quickReplies?: QuickReply[]) => Promise<void>;
+  /** flow:add_task の LLM 呼び出しに使う (任意。無ければ 409)。 */
+  llm?: LlmClient;
   /** 設定ページに表示する環境情報 (任意)。 */
   settingsInfo?: SettingsViewInfo;
 }
@@ -101,11 +105,22 @@ async function handleRequest(
 }
 
 export async function handleDashboardIntent(
-  opts: Pick<DashboardServerOptions, "db" | "sendToOwner">,
+  opts: Pick<DashboardServerOptions, "db" | "sendToOwner" | "llm">,
   action: string,
 ): Promise<{ message: string }> {
   if (!opts.sendToOwner) {
     throw new DashboardIntentError(409, "Slack連携が未設定です。Slack Bot DMで操作してください。");
+  }
+
+  if (action === "flow:add_task") {
+    if (!opts.llm) {
+      throw new DashboardIntentError(409, "Codex App Serverが未設定です。`manaiger doctor` で確認してください。");
+    }
+    const sendToOwner = opts.sendToOwner;
+    await processTurn({ db: opts.db, llm: opts.llm }, { kind: "add_task" }, async (text) => {
+      await sendToOwner(text, followUpQuickReplies(text));
+    });
+    return { message: "Slack DMでタスク追加のヒアリングを始めました。" };
   }
 
   const coaching = parseCoachingIntent(action.replace(/^coach:/, "manaiger:coach:"));
